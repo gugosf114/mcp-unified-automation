@@ -95,6 +95,14 @@ if (USE_SSE) {
     res.end();
   });
 
+  httpServer.on("error", (err: NodeJS.ErrnoException) => {
+    if (err.code === "EADDRINUSE") {
+      console.error(`SSE port ${SSE_PORT} already in use — skipping SSE transport (stdio still active)`);
+    } else {
+      console.error(`HTTP server error: ${err.message}`);
+    }
+  });
+
   httpServer.listen(SSE_PORT, SSE_HOST, () => {
     const localBase = `http://${SSE_HOST}:${SSE_PORT}`;
     const publicBase = PUBLIC_BASE_URL || localBase;
