@@ -1,6 +1,12 @@
 import { mkdirSync, writeFileSync, readFileSync, existsSync, readdirSync, unlinkSync } from 'fs';
-import { join } from 'path';
+import { join, dirname } from 'path';
+import { fileURLToPath } from 'url';
 import type { ContextName } from '../types/common.js';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+// Repo root = two levels up from src/checkpoint/
+const REPO_ROOT = join(__dirname, '..', '..');
 
 export interface Checkpoint {
   taskId: string;
@@ -27,7 +33,7 @@ export class CheckpointStore {
   private baseDir: string;
 
   constructor(baseDir?: string) {
-    this.baseDir = baseDir || join(process.cwd(), 'data', 'checkpoints');
+    this.baseDir = baseDir || join(REPO_ROOT, 'data', 'checkpoints');
     mkdirSync(this.baseDir, { recursive: true });
   }
 
