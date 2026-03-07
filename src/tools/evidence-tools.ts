@@ -5,7 +5,7 @@ import type { EvidenceLedger } from "../evidence/evidence-ledger.js";
 export function registerEvidenceTools(server: McpServer, ledger: EvidenceLedger) {
 
   server.tool(
-    "evidence.export",
+    "evidence_export",
     "Export all evidence records for a task as JSON. Includes hash chain, " +
     "screenshot paths, DOM snapshots, and action logs. Also verifies chain integrity.",
     {

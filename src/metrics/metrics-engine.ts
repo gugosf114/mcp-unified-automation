@@ -1,5 +1,10 @@
 import { mkdirSync, appendFileSync, readFileSync, existsSync } from 'fs';
-import { join } from 'path';
+import { join, dirname } from 'path';
+import { fileURLToPath } from 'url';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+const PROJECT_ROOT = join(__dirname, '..', '..');
 
 export interface StepMetric {
   taskId: string;
@@ -41,7 +46,7 @@ export class MetricsEngine {
   private logFile: string;
 
   constructor(baseDir?: string) {
-    const dir = baseDir || join(process.cwd(), 'data', 'metrics');
+    const dir = baseDir || join(PROJECT_ROOT, 'data', 'metrics');
     mkdirSync(dir, { recursive: true });
     this.logFile = join(dir, 'metrics.ndjson');
   }

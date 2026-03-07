@@ -12,7 +12,7 @@ export function registerNetworkTools(
 ) {
 
   server.tool(
-    "network.learn",
+    "network_learn",
     "Discover JSON API endpoints from captured network traffic on a page. " +
     "First attaches CDP if not already attached, then returns discovered endpoints.",
     {
@@ -49,7 +49,7 @@ export function registerNetworkTools(
   );
 
   server.tool(
-    "network.block",
+    "network_block",
     "Apply a network blocking profile. Blocks ads, trackers, fonts, media, etc. " +
     "Profiles: 'none', 'minimal' (ads+trackers+fonts), 'aggressive' (+images+media+chat).",
     {

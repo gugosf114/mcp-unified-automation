@@ -6,7 +6,7 @@ import type { SessionManager } from "../session/session-manager.js";
 export function registerObserveTools(server: McpServer, observer: ObserverBus, session: SessionManager) {
 
   server.tool(
-    "observe.start",
+    "observe_start",
     "Start observing DOM mutations and form changes on a named session's page. " +
     "Injects MutationObserver and event listeners. Events are logged internally " +
     "and can drive task decisions.",

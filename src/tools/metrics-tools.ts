@@ -5,7 +5,7 @@ import type { MetricsEngine } from "../metrics/metrics-engine.js";
 export function registerMetricsTools(server: McpServer, metrics: MetricsEngine) {
 
   server.tool(
-    "metrics.report",
+    "metrics_report",
     "Get aggregated metrics: success rate, step latencies (avg + p95), retry counts, " +
     "manual interventions, per-task breakdown. Optionally filter by time window.",
     {

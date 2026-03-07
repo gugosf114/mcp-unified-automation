@@ -5,7 +5,7 @@ import type { SessionManager } from "../session/session-manager.js";
 export function registerSessionTools(server: McpServer, session: SessionManager) {
 
   server.tool(
-    "session.open",
+    "session_open",
     "Open or reuse a named browser session (tab). All sessions share the same " +
     "Chrome profile and cookies. Named sessions: 'linkedin', 'credit', 'court', etc.",
     {
@@ -39,7 +39,7 @@ export function registerSessionTools(server: McpServer, session: SessionManager)
   );
 
   server.tool(
-    "session.warm",
+    "session_warm",
     "Open a named session AND navigate to its home URL (configured via " +
     "CONTEXT_{NAME}_HOME env var). Use to pre-warm authenticated sessions.",
     {
