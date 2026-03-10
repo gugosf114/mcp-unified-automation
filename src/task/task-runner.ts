@@ -1,5 +1,5 @@
 import type { ToolResult, ContextName } from '../types/common.js';
-import type { TaskSpec, TaskStatus, StepContext } from '../types/task.js';
+import type { TaskSpec, TaskStatus, StepContext, StepEntry } from '../types/task.js';
 import type { SessionManager } from '../session/session-manager.js';
 import type { ActionExecutor } from '../action/action-executor.js';
 import type { CheckpointStore, Checkpoint } from '../checkpoint/checkpoint-store.js';
@@ -8,7 +8,9 @@ import type { PolicyGate } from '../policy/policy-gate.js';
 import type { RecoveryDaemon } from '../recovery/recovery-daemon.js';
 import type { MetricsEngine, StepMetric } from '../metrics/metrics-engine.js';
 import type { StepRegistry } from './step-registry.js';
+import { resolveStepEntry } from './dsl-parser.js';
 import { createHash } from 'crypto';
+import { readFileSync, existsSync } from 'fs';
 
 /**
  * TaskRunner — per-task state machine.
@@ -138,6 +140,77 @@ export class TaskRunner {
   // ── Core loop ─────────────────────────────────────────────────────
 
   private async executeLoop(): Promise<ToolResult> {
+    const concurrency = this.spec.concurrency || 1;
+
+    // Parallel entity processing: batch entities if concurrency > 1
+    if (concurrency > 1 && this.entities.length > 1) {
+      return this.executeParallel(concurrency);
+    }
+
+    return this.executeSequential();
+  }
+
+  private async executeParallel(concurrency: number): Promise<ToolResult> {
+    const allResults: any[] = [];
+    const remaining = this.entities.slice(this.currentEntityIndex);
+    let failed = false;
+
+    for (let batch = 0; batch < remaining.length; batch += concurrency) {
+      if (this.pauseRequested || failed) break;
+
+      const chunk = remaining.slice(batch, batch + concurrency);
+      const batchPromises = chunk.map(async (entity, offset) => {
+        const ei = this.currentEntityIndex + batch + offset;
+        const idemKey = this.computeIdempotencyKey(entity);
+        if (idemKey && this.processedKeys.includes(idemKey)) {
+          return { entity: ei, skipped: true };
+        }
+
+        const entityResults: any[] = [];
+        for (let si = 0; si < this.spec.steps.length; si++) {
+          const stepEntry = this.spec.steps[si];
+          const { stepName, skip } = resolveStepEntry(stepEntry, entity, {});
+          if (skip) continue;
+
+          const stepResult = await this.executeStep(entity, stepName, si);
+          entityResults.push({ step: stepName, result: stepResult });
+
+          if (stepResult.status === 'error') {
+            if (!this.spec.onError.includes('checkpoint_and_continue')) {
+              return { entity: ei, error: true, results: entityResults };
+            }
+          }
+        }
+
+        if (idemKey) this.processedKeys.push(idemKey);
+        return { entity: ei, results: entityResults };
+      });
+
+      const batchResults = await Promise.all(batchPromises);
+      for (const r of batchResults) {
+        allResults.push(r);
+        if (r.error) failed = true;
+      }
+    }
+
+    if (failed) {
+      this._status = 'failed';
+      return { status: 'error', taskId: this.taskId, data: { results: allResults } };
+    }
+
+    this._status = 'completed';
+    return {
+      status: 'success',
+      taskId: this.taskId,
+      data: {
+        message: 'Task completed (parallel)',
+        processedCount: this.processedKeys.length,
+        results: allResults,
+      },
+    };
+  }
+
+  private async executeSequential(): Promise<ToolResult> {
     const results: any[] = [];
 
     for (let ei = this.currentEntityIndex; ei < this.entities.length; ei++) {
@@ -152,7 +225,14 @@ export class TaskRunner {
 
       for (let si = this.currentStepIndex; si < this.spec.steps.length; si++) {
         this.currentStepIndex = si;
-        const stepName = this.spec.steps[si];
+        const stepEntry = this.spec.steps[si];
+
+        // Resolve conditional steps
+        const { stepName, skip } = resolveStepEntry(stepEntry, entity, this.formState);
+        if (skip) {
+          results.push({ entity: ei, step: stepName, result: { status: 'skip', data: { reason: 'condition not met' } } });
+          continue;
+        }
 
         // Check pause request
         if (this.pauseRequested) {
@@ -200,7 +280,6 @@ export class TaskRunner {
 
         if (stepResult.status === 'error') {
           await this.handleError(stepName, si, entity);
-          // If onError includes checkpoint_and_continue, keep going
           if (this.spec.onError.includes('checkpoint_and_continue')) {
             continue;
           } else {
@@ -351,7 +430,7 @@ export class TaskRunner {
     const checkpoint: Checkpoint = {
       taskId: this.taskId,
       stepIndex: this.currentStepIndex,
-      stepName: this.spec.steps[this.currentStepIndex] || 'unknown',
+      stepName: this.resolveStepName(this.currentStepIndex),
       entityIndex: this.currentEntityIndex,
       timestamp: Date.now(),
       contextName: this.spec.context,
@@ -368,13 +447,61 @@ export class TaskRunner {
   // ── Helpers ───────────────────────────────────────────────────────
 
   private resolveEntities(): Record<string, any>[] {
-    if (this.spec.entities.source === 'provided' && this.spec.entities.items) {
-      const items = this.spec.entities.items;
-      return this.spec.entities.limit ? items.slice(0, this.spec.entities.limit) : items;
+    const { source, items, limit } = this.spec.entities;
+    let resolved: Record<string, any>[];
+
+    switch (source) {
+      case 'provided':
+        resolved = items || [];
+        break;
+
+      case 'csv': {
+        // items[0] should contain { path: string, delimiter?: string }
+        const csvConfig = items?.[0] as { path?: string; delimiter?: string } | undefined;
+        if (!csvConfig?.path) {
+          throw new Error('CSV source requires items[0].path');
+        }
+        resolved = this.parseCsv(csvConfig.path, csvConfig.delimiter || ',');
+        break;
+      }
+
+      case 'clipboard': {
+        // Read clipboard from the page context
+        // Clipboard content is resolved at runtime — inject a placeholder
+        // that the first step can populate via page.evaluate
+        resolved = [{ source: 'clipboard', index: 0, pending: true }];
+        break;
+      }
+
+      default:
+        // Unknown source — single placeholder entity for step implementations
+        resolved = [{ source, index: 0 }];
     }
-    // For other sources, return a single placeholder entity.
-    // Domain-specific step implementations will discover entities at runtime.
-    return [{ source: this.spec.entities.source, index: 0 }];
+
+    return limit ? resolved.slice(0, limit) : resolved;
+  }
+
+  private parseCsv(filePath: string, delimiter: string): Record<string, any>[] {
+    if (!existsSync(filePath)) {
+      throw new Error(`CSV file not found: ${filePath}`);
+    }
+    const content = readFileSync(filePath, 'utf-8');
+    const lines = content.trim().split('\n').filter(l => l.length > 0);
+    if (lines.length < 2) return []; // need header + at least one row
+
+    const headers = lines[0].split(delimiter).map(h => h.trim().replace(/^["']|["']$/g, ''));
+    const entities: Record<string, any>[] = [];
+
+    for (let i = 1; i < lines.length; i++) {
+      const values = lines[i].split(delimiter).map(v => v.trim().replace(/^["']|["']$/g, ''));
+      const entity: Record<string, any> = {};
+      headers.forEach((header, idx) => {
+        entity[header] = values[idx] || '';
+      });
+      entities.push(entity);
+    }
+
+    return entities;
   }
 
   private computeIdempotencyKey(entity: Record<string, any>): string | null {
@@ -386,6 +513,12 @@ export class TaskRunner {
       return String(entity[field] || 'unknown');
     });
     return key;
+  }
+
+  private resolveStepName(index: number): string {
+    const entry = this.spec.steps[index];
+    if (!entry) return 'unknown';
+    return typeof entry === 'string' ? entry : entry.step;
   }
 
   private async computeCookiesHash(): Promise<string> {

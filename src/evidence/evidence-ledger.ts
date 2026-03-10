@@ -1,4 +1,4 @@
-import { mkdirSync, appendFileSync, readFileSync, existsSync, writeFileSync } from 'fs';
+import { mkdirSync, appendFileSync, readFileSync, existsSync, writeFileSync, readdirSync, renameSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { createHash, randomUUID } from 'crypto';
@@ -225,6 +225,37 @@ export class EvidenceLedger {
     }
 
     return { valid: true, totalRecords: lines.length };
+  }
+
+  /**
+   * Archive a completed task's evidence directory by renaming it.
+   * Useful for preventing unbounded growth of evidence files.
+   * The hash chain is preserved intact within the archive.
+   */
+  async archive(taskId: string): Promise<string | null> {
+    const dir = this.taskDir(taskId);
+    if (!existsSync(dir)) return null;
+
+    const archiveName = `${taskId.replace(/[^a-zA-Z0-9_\-\.]/g, '_')}-archived-${Date.now()}`;
+    const archiveDir = join(this.baseDir, archiveName);
+    renameSync(dir, archiveDir);
+
+    // Clear in-memory caches for this task
+    this.lastHash.delete(taskId);
+    this.counters.delete(taskId);
+
+    return archiveDir;
+  }
+
+  /**
+   * List all task IDs that have evidence directories.
+   */
+  listTasks(): string[] {
+    if (!existsSync(this.baseDir)) return [];
+    return readdirSync(this.baseDir).filter(name => {
+      const ledger = join(this.baseDir, name, 'ledger.ndjson');
+      return existsSync(ledger);
+    });
   }
 
   getBaseDir(): string {

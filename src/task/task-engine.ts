@@ -17,8 +17,11 @@ import { TaskRunner } from './task-runner.js';
  * MCP tools delegate to this: task.plan, task.run, task.resume,
  * task.pause, task.commit.
  */
+export type NotifyFn = (level: 'info' | 'warning' | 'error', data: any) => void;
+
 export class TaskEngine {
   private runners: Map<string, TaskRunner> = new Map();
+  private notifyFn: NotifyFn | null = null;
 
   constructor(
     private sessionManager: SessionManager,
@@ -32,6 +35,19 @@ export class TaskEngine {
   ) {}
 
   /**
+   * Wire a notification callback. Called by index.ts with sendLoggingMessage.
+   */
+  onNotify(fn: NotifyFn): void {
+    this.notifyFn = fn;
+  }
+
+  private notify(level: 'info' | 'warning' | 'error', data: any): void {
+    if (this.notifyFn) {
+      try { this.notifyFn(level, data); } catch { /* best-effort */ }
+    }
+  }
+
+  /**
    * Parse and validate a task spec without executing.
    * Returns the parsed spec so Claude can review it before calling run().
    */
@@ -39,8 +55,9 @@ export class TaskEngine {
     try {
       const spec = parseTaskSpec(specString);
 
-      // Validate that all steps are registered
-      const unknownSteps = spec.steps.filter(s => !this.stepRegistry.has(s));
+      // Validate that all steps are registered (handle both string and {step,when} entries)
+      const stepNames = spec.steps.map(s => typeof s === 'string' ? s : s.step);
+      const unknownSteps = stepNames.filter(s => !this.stepRegistry.has(s));
       const unknownErrorHandlers = spec.onError.filter(s => !this.stepRegistry.has(s));
 
       return {
@@ -48,7 +65,7 @@ export class TaskEngine {
         data: {
           spec,
           validation: {
-            stepsFound: spec.steps.filter(s => this.stepRegistry.has(s)),
+            stepsFound: stepNames.filter(s => this.stepRegistry.has(s)),
             unknownSteps,
             unknownErrorHandlers,
             registeredSteps: this.stepRegistry.listSteps(),
@@ -91,7 +108,10 @@ export class TaskEngine {
       );
 
       this.runners.set(spec.taskId, runner);
-      return runner.run();
+      this.notify('info', { event: 'task_started', taskId: spec.taskId, steps: spec.steps.length });
+      const result = await runner.run();
+      this.notifyResult(spec.taskId, result);
+      return result;
     } catch (error: any) {
       return { status: 'error', error: error.message };
     }
@@ -176,8 +196,11 @@ export class TaskEngine {
       return { status: 'error', taskId, error: 'No pending approval found' };
     }
 
+    this.notify('info', { event: 'task_approved', taskId });
     // Resume the runner
-    return runner.onApproval();
+    const result = await runner.onApproval();
+    this.notifyResult(taskId, result);
+    return result;
   }
 
   /**
@@ -212,6 +235,17 @@ export class TaskEngine {
     }
     runner.cancel();
     this.runners.delete(taskId);
+    this.notify('info', { event: 'task_cancelled', taskId });
     return { status: 'success', taskId, data: { message: `Task ${taskId} cancelled` } };
+  }
+
+  private notifyResult(taskId: string, result: ToolResult): void {
+    if (result.status === 'success') {
+      this.notify('info', { event: 'task_completed', taskId });
+    } else if (result.status === 'pending_approval') {
+      this.notify('warning', { event: 'task_awaiting_approval', taskId, approval: result.approvalRequired });
+    } else if (result.status === 'error') {
+      this.notify('error', { event: 'task_failed', taskId, error: result.error });
+    }
   }
 }

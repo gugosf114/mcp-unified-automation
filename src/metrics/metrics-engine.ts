@@ -1,10 +1,7 @@
-import { mkdirSync, appendFileSync, readFileSync, existsSync } from 'fs';
-import { join, dirname } from 'path';
-import { fileURLToPath } from 'url';
+import { mkdirSync, appendFileSync, readFileSync, existsSync, statSync, renameSync } from 'fs';
+import { join } from 'path';
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = dirname(__filename);
-const PROJECT_ROOT = join(__dirname, '..', '..');
+const PROJECT_ROOT = process.cwd();
 
 export interface StepMetric {
   taskId: string;
@@ -44,16 +41,31 @@ export interface MetricsReport {
  */
 export class MetricsEngine {
   private logFile: string;
+  private dir: string;
+  private maxFileSizeBytes: number;
 
-  constructor(baseDir?: string) {
-    const dir = baseDir || join(PROJECT_ROOT, 'data', 'metrics');
-    mkdirSync(dir, { recursive: true });
-    this.logFile = join(dir, 'metrics.ndjson');
+  constructor(baseDir?: string, maxFileSizeMB: number = 10) {
+    this.dir = baseDir || join(PROJECT_ROOT, 'data', 'metrics');
+    mkdirSync(this.dir, { recursive: true });
+    this.logFile = join(this.dir, 'metrics.ndjson');
+    this.maxFileSizeBytes = maxFileSizeMB * 1024 * 1024;
   }
 
   async recordStep(metric: StepMetric): Promise<void> {
+    this.rotateIfNeeded();
     const line = JSON.stringify(metric) + '\n';
     appendFileSync(this.logFile, line, 'utf-8');
+  }
+
+  private rotateIfNeeded(): void {
+    try {
+      if (!existsSync(this.logFile)) return;
+      const stat = statSync(this.logFile);
+      if (stat.size >= this.maxFileSizeBytes) {
+        const rotatedName = `metrics-${new Date().toISOString().replace(/[:.]/g, '-')}.ndjson`;
+        renameSync(this.logFile, join(this.dir, rotatedName));
+      }
+    } catch { /* rotation is best-effort */ }
   }
 
   async report(windowMs?: number): Promise<MetricsReport> {

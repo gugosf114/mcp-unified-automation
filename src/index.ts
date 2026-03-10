@@ -1,7 +1,9 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { SSEServerTransport } from "@modelcontextprotocol/sdk/server/sse.js";
+import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { createServer, IncomingMessage, ServerResponse } from "http";
+import { randomUUID } from "crypto";
 import { Kernel } from "./kernel.js";
 import { env } from "./env.js";
 import { registerBrowserCompatTools } from "./tools/browser-compat.js";
@@ -40,7 +42,7 @@ const TOOL_COUNTS = {
 const TOTAL_TOOLS = Object.values(TOOL_COUNTS).reduce((a, b) => a + b, 0);
 
 function createMcpServer() {
-  const server = new McpServer({ name: "unified-automation", version: "2.1.0" });
+  const server = new McpServer({ name: "unified-automation", version: "2.2.0" });
 
   // ── Tools ───────────────────────────────────────────────────────
   registerBrowserCompatTools(server, kernel.sessionManager);
@@ -66,6 +68,15 @@ function createMcpServer() {
 
   // ── Prompts ─────────────────────────────────────────────────────
   registerPrompts(server);
+
+  // ── Notifications ──────────────────────────────────────────────
+  kernel.taskEngine.onNotify((level, data) => {
+    server.sendLoggingMessage({
+      level,
+      logger: 'task-engine',
+      data,
+    }).catch(() => {});
+  });
 
   return server;
 }
@@ -93,6 +104,8 @@ function isAuthorized(req: IncomingMessage): boolean {
 if (USE_SSE) {
   const sseServer = createMcpServer();
   const transports: Record<string, SSEServerTransport> = {};
+  // Streamable HTTP: one transport per session, keyed by session ID
+  const streamableTransports: Map<string, StreamableHTTPServerTransport> = new Map();
 
   const httpServer = createServer(async (req, res) => {
     setCors(res);
@@ -112,7 +125,7 @@ if (USE_SSE) {
     const url = req.url || "";
     if (req.method === "GET" && url === "/health") {
       res.writeHead(200, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ ok: true, transport: "sse", version: "2.1.0", tools: TOTAL_TOOLS }));
+      res.end(JSON.stringify({ ok: true, transport: "sse", version: "2.2.0", tools: TOTAL_TOOLS }));
       return;
     }
 
@@ -148,6 +161,41 @@ if (USE_SSE) {
       return;
     }
 
+    // ── Streamable HTTP transport (MCP SDK 1.12+) ────────────────
+    if (url === "/mcp" || url.startsWith("/mcp?")) {
+      const sessionId = req.headers['mcp-session-id'] as string | undefined;
+
+      if (req.method === "GET" || req.method === "POST" || req.method === "DELETE") {
+        let transport: StreamableHTTPServerTransport;
+
+        if (sessionId && streamableTransports.has(sessionId)) {
+          transport = streamableTransports.get(sessionId)!;
+        } else if (req.method === "POST" && !sessionId) {
+          // New session — create transport
+          transport = new StreamableHTTPServerTransport({
+            sessionIdGenerator: () => randomUUID(),
+          });
+          const mcpServer = createMcpServer();
+          await mcpServer.connect(transport);
+
+          // Store by session ID after first request
+          if (transport.sessionId) {
+            streamableTransports.set(transport.sessionId, transport);
+            transport.onclose = () => {
+              if (transport.sessionId) streamableTransports.delete(transport.sessionId);
+            };
+          }
+        } else {
+          res.writeHead(400, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ error: "Bad request — missing session ID" }));
+          return;
+        }
+
+        await transport.handleRequest(req, res);
+        return;
+      }
+    }
+
     res.writeHead(404);
     res.end();
   });
@@ -179,9 +227,10 @@ const toolBreakdown = Object.entries(TOOL_COUNTS)
   .map(([name, count]) => `${name}(${count})`)
   .join(' + ');
 
-console.error('Unified Automation MCP server v2.1.0 started');
+console.error('Unified Automation MCP server v2.2.0 started');
 console.error(`  Tools: ${toolBreakdown} = ${TOTAL_TOOLS} total`);
 console.error(`  Resources: 6 (sessions, tasks, evidence, checkpoint, metrics, server-info)`);
 console.error(`  Prompts: 3 (batch-scrape, linkedin-apply, evidence-audit)`);
 console.error(`  Stdio: connected`);
 console.error(`  SSE:   ${USE_SSE ? `http://${SSE_HOST}:${SSE_PORT}/sse` : "disabled"}`);
+console.error(`  HTTP:  ${USE_SSE ? `http://${SSE_HOST}:${SSE_PORT}/mcp (Streamable HTTP)` : "disabled"}`);

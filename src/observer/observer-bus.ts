@@ -48,7 +48,7 @@ export class ObserverBus extends EventEmitter {
     // Inject observer script into the page
     await page.evaluate((cbName: string) => {
       // MutationObserver for DOM changes
-      const observer = new MutationObserver((mutations) => {
+      const observer = (window as any).__mcpMutationObserver = new MutationObserver((mutations) => {
         for (const mutation of mutations) {
           if (mutation.type === 'childList' && mutation.addedNodes.length > 0) {
             (window as any)[cbName](JSON.stringify({
@@ -87,11 +87,24 @@ export class ObserverBus extends EventEmitter {
     this.observing.set(contextName, true);
   }
 
-  async stopObserving(contextName: ContextName): Promise<void> {
+  async stopObserving(contextName: ContextName, page?: Page): Promise<void> {
     this.observing.set(contextName, false);
-    // Note: the injected script continues running in the page but
-    // the Node.js callback will no longer emit events if we check the flag.
-    // A full cleanup would require page.evaluate to disconnect the observer.
+
+    // Disconnect the injected MutationObserver in the page context
+    if (page && !page.isClosed()) {
+      const callbackName = `__mcpObserver_${contextName.replace(/[^a-zA-Z0-9]/g, '_')}`;
+      try {
+        await page.evaluate((cbName: string) => {
+          // Null out the callback so no more events fire
+          (window as any)[cbName] = () => {};
+          // Disconnect any MutationObserver we stored
+          if ((window as any).__mcpMutationObserver) {
+            (window as any).__mcpMutationObserver.disconnect();
+            delete (window as any).__mcpMutationObserver;
+          }
+        }, callbackName);
+      } catch { /* page may already be closed */ }
+    }
   }
 
   isObserving(contextName: ContextName): boolean {

@@ -4,16 +4,27 @@ import type { SessionManager } from '../session/session-manager.js';
 
 // ── Task DSL specification ──────────────────────────────────────────
 
+/**
+ * A step can be a simple name (always runs) or a conditional step
+ * that only runs when its `when` expression evaluates truthy.
+ *
+ * Conditional syntax:
+ *   { "step": "upload_resume", "when": "{{hasResume}} == true" }
+ *   { "step": "fill_cover_letter", "when": "{{coverLetterRequired}}" }
+ */
+export type StepEntry = string | { step: string; when: string };
+
 export interface TaskSpec {
   taskId: string;
   context: ContextName;
   mode: 'auto' | 'semi_auto' | 'manual';
   entities: {
-    source: string;        // e.g., "saved_jobs", "provided" (inline list)
+    source: string;        // e.g., "saved_jobs", "provided", "csv", "clipboard"
     items?: any[];         // inline entity list (when source === "provided")
     limit?: number;
   };
-  steps: string[];
+  steps: StepEntry[];
+  concurrency?: number;     // max entities to process in parallel (default: 1 = sequential)
   idempotency?: {
     key: string;           // template: "{{jobId}}:{{profileHash}}"
   };
