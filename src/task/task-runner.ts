@@ -114,6 +114,11 @@ export class TaskRunner {
     };
   }
 
+  cancel(): void {
+    this._status = 'cancelled';
+    this.pauseRequested = true;
+  }
+
   async onApproval(): Promise<ToolResult> {
     if (this._status !== 'awaiting_approval') {
       return {

@@ -1,0 +1,155 @@
+import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { z } from "zod";
+import type { SessionManager } from "../session/session-manager.js";
+import type { ActionExecutor } from "../action/action-executor.js";
+
+/**
+ * Extended browser tools — the primitives missing from v1.0.
+ *
+ * These all operate on the "default" page slot for backward compatibility.
+ * For named-session variants, use the ActionExecutor directly via task steps.
+ */
+export function registerBrowserExtendedTools(
+  server: McpServer,
+  session: SessionManager,
+  executor: ActionExecutor,
+) {
+
+  server.tool(
+    "browser_scroll",
+    "Scroll the page or scroll a specific element into view. " +
+    "Directions: 'down', 'up', 'left', 'right'. Amount is in pixels.",
+    {
+      direction: z.enum(["down", "up", "left", "right"]).default("down")
+        .describe("Scroll direction"),
+      amount: z.number().default(500).describe("Scroll amount in pixels"),
+      selector: z.string().optional()
+        .describe("CSS selector to scroll into view (overrides direction/amount)"),
+    },
+    async ({ direction, amount, selector }) => {
+      const result = await executor.scroll('default', { direction, amount, selector });
+      return { content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }] };
+    }
+  );
+
+  server.tool(
+    "browser_hover",
+    "Hover over an element to trigger tooltips, dropdowns, or hover states.",
+    {
+      selector: z.string().describe("CSS selector of element to hover"),
+    },
+    async ({ selector }) => {
+      const result = await executor.hover('default', selector);
+      return { content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }] };
+    }
+  );
+
+  server.tool(
+    "browser_keyboard",
+    "Press a keyboard key or key combination. Supports modifiers (Ctrl, Shift, Alt, Meta). " +
+    "Key names: Enter, Tab, Escape, ArrowDown, ArrowUp, Backspace, Delete, " +
+    "F1-F12, Home, End, PageUp, PageDown, and any single character.",
+    {
+      key: z.string().describe("Key to press (e.g., 'Enter', 'Tab', 'a', 'F5')"),
+      modifiers: z.array(z.enum(["Control", "Shift", "Alt", "Meta"])).optional()
+        .describe("Modifier keys to hold (e.g., ['Control', 'Shift'])"),
+    },
+    async ({ key, modifiers }) => {
+      const result = await executor.keyboard('default', key, { modifiers });
+      return { content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }] };
+    }
+  );
+
+  server.tool(
+    "browser_select_option",
+    "Select an option from a <select> dropdown by value, label, or index.",
+    {
+      selector: z.string().describe("CSS selector of the <select> element"),
+      value: z.string().describe("Option value, visible text, or index to select"),
+    },
+    async ({ selector, value }) => {
+      const result = await executor.select('default', selector, value);
+      return { content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }] };
+    }
+  );
+
+  server.tool(
+    "browser_upload",
+    "Upload a file via a file input element.",
+    {
+      selector: z.string().describe("CSS selector of the file input"),
+      file_path: z.string().describe("Absolute path to the file to upload"),
+    },
+    async ({ selector, file_path }) => {
+      const result = await executor.upload('default', selector, file_path);
+      return { content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }] };
+    }
+  );
+
+  server.tool(
+    "browser_download",
+    "Trigger a download by clicking an element and save the file. " +
+    "Waits for the download event and saves to the specified directory.",
+    {
+      trigger_selector: z.string().describe("CSS selector of the element that triggers download"),
+      download_dir: z.string().optional().describe("Directory to save to (default: ~/Downloads)"),
+    },
+    async ({ trigger_selector, download_dir }) => {
+      const result = await executor.download('default', trigger_selector, download_dir);
+      return { content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }] };
+    }
+  );
+
+  server.tool(
+    "browser_drag",
+    "Drag an element and drop it onto another element.",
+    {
+      source_selector: z.string().describe("CSS selector of element to drag"),
+      target_selector: z.string().describe("CSS selector of drop target"),
+    },
+    async ({ source_selector, target_selector }) => {
+      const result = await executor.drag('default', source_selector, target_selector);
+      return { content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }] };
+    }
+  );
+
+  server.tool(
+    "browser_wait_for_text",
+    "Wait for specific text to appear on the page. More intuitive than " +
+    "waiting for CSS selectors when you know what content to expect.",
+    {
+      text: z.string().describe("Text to wait for"),
+      selector: z.string().optional().describe("Limit search to this container (default: body)"),
+      timeout_ms: z.number().default(10000).describe("Timeout in milliseconds"),
+    },
+    async ({ text, selector, timeout_ms }) => {
+      const result = await executor.waitForText('default', text, { selector, timeout: timeout_ms });
+      return { content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }] };
+    }
+  );
+
+  server.tool(
+    "browser_pdf",
+    "Generate a PDF of the current page. Requires headless mode. " +
+    "Useful for evidence capture and compliance documentation.",
+    {
+      path: z.string().optional().describe("Output file path (default: Desktop)"),
+    },
+    async ({ path }) => {
+      const result = await executor.pdf('default', path);
+      return { content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }] };
+    }
+  );
+
+  server.tool(
+    "browser_accessibility_tree",
+    "Get the accessibility tree of the current page. Returns a structured " +
+    "snapshot of all accessible elements with roles, names, and values. " +
+    "More useful than raw DOM for understanding page structure.",
+    {},
+    async () => {
+      const result = await executor.accessibilityTree('default');
+      return { content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }] };
+    }
+  );
+}

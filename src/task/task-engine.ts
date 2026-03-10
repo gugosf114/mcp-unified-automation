@@ -190,4 +190,28 @@ export class TaskEngine {
     }
     return { status: 'success', taskId, data: runner.getStatus() };
   }
+
+  /**
+   * List all active tasks with their current status.
+   */
+  listTasks(): Array<{ taskId: string; status: string; [key: string]: any }> {
+    const tasks: Array<{ taskId: string; status: string; [key: string]: any }> = [];
+    for (const [_taskId, runner] of this.runners) {
+      tasks.push(runner.getStatus());
+    }
+    return tasks;
+  }
+
+  /**
+   * Cancel a task and remove from active runners.
+   */
+  cancel(taskId: string): ToolResult {
+    const runner = this.runners.get(taskId);
+    if (!runner) {
+      return { status: 'error', taskId, error: `No active task ${taskId}` };
+    }
+    runner.cancel();
+    this.runners.delete(taskId);
+    return { status: 'success', taskId, data: { message: `Task ${taskId} cancelled` } };
+  }
 }

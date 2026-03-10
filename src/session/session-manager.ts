@@ -3,6 +3,7 @@ import { existsSync } from 'fs';
 import { homedir } from 'os';
 import { join } from 'path';
 import type { ToolResult, ContextName, PageHandle } from '../types/common.js';
+import { env } from '../env.js';
 
 /**
  * SessionManager — single persistent BrowserContext, multiple named page slots.
@@ -27,18 +28,14 @@ export class SessionManager {
   private humanDelayMax: number;
 
   constructor() {
-    // HEADLESS takes priority, then BROWSER_HEADED (legacy)
-    if (process.env.HEADLESS !== undefined) {
-      this.headed = process.env.HEADLESS === 'false';
-    } else {
-      this.headed = process.env.BROWSER_HEADED !== 'false';
-    }
-    this.chromeChannel = process.env.CHROME_CHANNEL || undefined;
-    this.blockMedia = process.env.BROWSER_BLOCK_MEDIA === 'true';
-    this.humanDelayMin = parseInt(process.env.HUMAN_DELAY_MIN || '0');
-    this.humanDelayMax = parseInt(process.env.HUMAN_DELAY_MAX || '0');
-    this.chromeUserDataDir = process.env.CHROME_USER_DATA_DIR ||
-      join(homedir(), 'AppData', 'Local', 'mcp-unified-automation', 'chrome-profile');
+    // All env parsing and validation happens in src/env.ts via Zod.
+    // HEADLESS vs BROWSER_HEADED priority is resolved there.
+    this.headed = env.BROWSER_HEADED;
+    this.chromeChannel = env.CHROME_CHANNEL || undefined;
+    this.blockMedia = env.BROWSER_BLOCK_MEDIA;
+    this.humanDelayMin = env.HUMAN_DELAY_MIN;
+    this.humanDelayMax = env.HUMAN_DELAY_MAX;
+    this.chromeUserDataDir = env.CHROME_USER_DATA_DIR;
   }
 
   async humanDelay(): Promise<void> {

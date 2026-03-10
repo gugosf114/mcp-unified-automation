@@ -178,12 +178,19 @@ export class RecoveryDaemon {
     this.playbooks.push({
       name: 'navigation_loop',
       detect: async (page) => {
-        const contextName = 'default'; // simplified — real impl would track per-context
-        const history = this.urlHistory.get(contextName) || [];
-        if (history.length < 6) return false;
+        // Find which context owns this page by matching the URL in our history
+        let matchedHistory: Array<{ url: string; time: number }> | undefined;
+        for (const [_ctxName, history] of this.urlHistory.entries()) {
+          const lastEntry = history[history.length - 1];
+          if (lastEntry && lastEntry.url === page.url()) {
+            matchedHistory = history;
+            break;
+          }
+        }
+        if (!matchedHistory || matchedHistory.length < 6) return false;
 
         // Check last 6 entries for a repeating cycle of 2-3 URLs
-        const recent = history.slice(-6).map(h => h.url);
+        const recent = matchedHistory.slice(-6).map(h => h.url);
         const unique = new Set(recent);
         // If 6 recent URLs only have 2-3 unique values → loop
         return unique.size <= 3 && recent.length >= 6;
@@ -192,6 +199,185 @@ export class RecoveryDaemon {
         try {
           await page.goBack({ timeout: 10000 });
           return true;
+        } catch { return false; }
+      },
+    });
+
+    // 5. Network error detector (DNS, connection refused, timeout, SSL)
+    this.playbooks.push({
+      name: 'network_error',
+      detect: async (page) => {
+        try {
+          const hasNetError = await page.evaluate(() => {
+            const body = document.body?.innerText || '';
+            const title = document.title || '';
+            const combined = (body + ' ' + title).toLowerCase();
+            return (
+              combined.includes('err_connection_refused') ||
+              combined.includes('err_name_not_resolved') ||
+              combined.includes('err_internet_disconnected') ||
+              combined.includes('err_network_changed') ||
+              combined.includes('err_connection_timed_out') ||
+              combined.includes('err_connection_reset') ||
+              combined.includes('err_ssl_protocol_error') ||
+              combined.includes('dns_probe_finished') ||
+              combined.includes('this site can\u2019t be reached') ||
+              combined.includes("this site can't be reached") ||
+              combined.includes('unable to connect')
+            );
+          });
+          return hasNetError;
+        } catch {
+          // page.evaluate itself failing often means the page crashed
+          return true;
+        }
+      },
+      recover: async (page) => {
+        try {
+          // Wait 3s then reload — transient network issues often self-resolve
+          await new Promise(r => setTimeout(r, 3000));
+          await page.reload({ waitUntil: 'domcontentloaded', timeout: 20000 });
+          // Verify we got a real page back
+          const stillBroken = await page.evaluate(() => {
+            const text = (document.body?.innerText || '').toLowerCase();
+            return text.includes('err_') || text.includes("this site can");
+          }).catch(() => true);
+          if (stillBroken) {
+            // Second attempt with longer backoff
+            await new Promise(r => setTimeout(r, 5000));
+            await page.reload({ waitUntil: 'domcontentloaded', timeout: 30000 });
+          }
+          console.error('[RecoveryDaemon] Network error — reload attempted');
+          return true;
+        } catch {
+          console.error('[RecoveryDaemon] Network error — reload failed, network may be down');
+          return false;
+        }
+      },
+    });
+
+    // 6. Anti-bot / rate-limit detector (Cloudflare, LinkedIn walls, generic blocks)
+    this.playbooks.push({
+      name: 'anti_bot',
+      detect: async (page) => {
+        try {
+          const blockType = await page.evaluate(() => {
+            const body = document.body?.innerText?.toLowerCase() || '';
+            const title = document.title?.toLowerCase() || '';
+            const combined = body + ' ' + title;
+
+            // Cloudflare challenge
+            if (
+              combined.includes('checking your browser') ||
+              combined.includes('attention required') ||
+              (combined.includes('cloudflare') && combined.includes('ray id')) ||
+              document.querySelector('#cf-challenge-running') ||
+              document.querySelector('.cf-browser-verification')
+            ) return 'cloudflare';
+
+            // LinkedIn auth wall / rate limit
+            if (
+              combined.includes("let's do a quick security check") ||
+              combined.includes("we've detected unusual activity") ||
+              combined.includes('auth wall') ||
+              (document.querySelector('.join-form') && combined.includes('sign in')) ||
+              combined.includes('too many requests') ||
+              combined.includes('rate limit')
+            ) return 'linkedin_block';
+
+            // Generic bot detection / 403 / 429
+            if (
+              combined.includes('access denied') ||
+              (combined.includes('blocked') && combined.includes('automated')) ||
+              (combined.includes('robot') && combined.includes('not a robot')) ||
+              combined.includes('suspicious activity') ||
+              combined.includes('please verify you are human')
+            ) return 'generic_block';
+
+            return null;
+          });
+          return blockType !== null;
+        } catch { return false; }
+      },
+      recover: async (page) => {
+        // Anti-bot walls cannot be auto-solved — identify the type and log for intervention
+        try {
+          const blockType = await page.evaluate(() => {
+            const combined = (document.body?.innerText + ' ' + document.title).toLowerCase();
+            if (combined.includes('cloudflare')) return 'Cloudflare challenge';
+            if (combined.includes('linkedin') || combined.includes('security check')) return 'LinkedIn auth wall';
+            if (combined.includes('rate limit') || combined.includes('too many')) return 'Rate limit (429)';
+            return 'Generic anti-bot block';
+          }).catch(() => 'Unknown block type');
+          console.error(`[RecoveryDaemon] Anti-bot detected: ${blockType} — manual intervention required`);
+        } catch { /* best effort logging */ }
+        return false; // never auto-recoverable
+      },
+    });
+
+    // 7. Cookie consent auto-dismiss
+    this.playbooks.push({
+      name: 'cookie_consent',
+      detect: async (page) => {
+        try {
+          return await page.evaluate(() => {
+            // Common cookie consent frameworks: OneTrust, CookieBot, CookieYes, Osano, etc.
+            const selectors = [
+              '#onetrust-accept-btn-handler',
+              '#CybotCookiebotDialogBodyLevelButtonLevelOptinAllowAll',
+              '[data-cookiefirst-action="accept"]',
+              '.cookie-consent-accept',
+              '[class*="cookie"] button[class*="accept"]',
+              '[class*="cookie"] button[class*="Allow"]',
+              '[id*="cookie"] button[class*="accept"]',
+              '[aria-label*="cookie" i] button',
+              '[aria-label*="consent" i] button',
+              'button[data-testid*="cookie-accept"]',
+              '.cc-accept',
+              '.cc-allow',
+              '#accept-cookies',
+              '#acceptAllCookies',
+              'button[id*="accept"][id*="cookie" i]',
+            ];
+            for (const sel of selectors) {
+              const el = document.querySelector(sel) as HTMLElement;
+              if (el && el.offsetParent !== null) return true;
+            }
+            return false;
+          });
+        } catch { return false; }
+      },
+      recover: async (page) => {
+        try {
+          const clicked = await page.evaluate(() => {
+            const selectors = [
+              '#onetrust-accept-btn-handler',
+              '#CybotCookiebotDialogBodyLevelButtonLevelOptinAllowAll',
+              '[data-cookiefirst-action="accept"]',
+              '.cookie-consent-accept',
+              '[class*="cookie"] button[class*="accept"]',
+              '[class*="cookie"] button[class*="Allow"]',
+              '[id*="cookie"] button[class*="accept"]',
+              '.cc-accept',
+              '.cc-allow',
+              '#accept-cookies',
+              '#acceptAllCookies',
+              'button[id*="accept"][id*="cookie" i]',
+            ];
+            for (const sel of selectors) {
+              const el = document.querySelector(sel) as HTMLElement;
+              if (el && el.offsetParent !== null) {
+                el.click();
+                return sel;
+              }
+            }
+            return null;
+          });
+          if (clicked) {
+            console.error(`[RecoveryDaemon] Dismissed cookie consent via ${clicked}`);
+            return true;
+          }
+          return false;
         } catch { return false; }
       },
     });
