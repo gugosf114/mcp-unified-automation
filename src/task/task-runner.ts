@@ -11,6 +11,7 @@ import type { StepRegistry } from './step-registry.js';
 import { resolveStepEntry } from './dsl-parser.js';
 import { createHash } from 'crypto';
 import { readFileSync, existsSync } from 'fs';
+import { env } from '../env.js';
 
 /**
  * TaskRunner — per-task state machine.
@@ -306,8 +307,10 @@ export class TaskRunner {
           this.formState = { ...this.formState, ...stepResult.formState };
         }
 
-        // Checkpoint after each successful step
-        await this.saveCheckpoint();
+        // Checkpoint after each successful step (every 3rd step in FAST_MODE)
+        if (!env.FAST_MODE || si % 3 === 2 || si === this.spec.steps.length - 1) {
+          await this.saveCheckpoint();
+        }
       }
 
       // All steps done for this entity — mark processed
@@ -368,12 +371,14 @@ export class TaskRunner {
     try {
       const result = await stepFn(ctx, this.actionExecutor, this.sessionManager);
 
-      // Record evidence for each step
-      await this.evidenceLedger.recordAction(this.taskId, stepIndex, stepName, {
-        status: result.status,
-        entityIndex: this.currentEntityIndex,
-        data: result.data,
-      });
+      // Record evidence for each step (skip in FAST_MODE to reduce I/O)
+      if (!env.FAST_MODE) {
+        await this.evidenceLedger.recordAction(this.taskId, stepIndex, stepName, {
+          status: result.status,
+          entityIndex: this.currentEntityIndex,
+          data: result.data,
+        });
+      }
 
       // Record metrics
       const metric: StepMetric = {

@@ -33,8 +33,8 @@ export class SessionManager {
     this.headed = env.BROWSER_HEADED;
     this.chromeChannel = env.CHROME_CHANNEL || undefined;
     this.blockMedia = env.BROWSER_BLOCK_MEDIA;
-    this.humanDelayMin = env.HUMAN_DELAY_MIN;
-    this.humanDelayMax = env.HUMAN_DELAY_MAX;
+    this.humanDelayMin = env.FAST_MODE ? 0 : env.HUMAN_DELAY_MIN;
+    this.humanDelayMax = env.FAST_MODE ? 0 : env.HUMAN_DELAY_MAX;
     this.chromeUserDataDir = env.CHROME_USER_DATA_DIR;
   }
 
