@@ -141,14 +141,6 @@ src/
 
 ---
 
-## हिंदी में सारांश (Summary in Hindi)
-
-सबसे ज़रूरी बात — अब server को पता है कि LinkedIn, Gmail, Google Search, GitHub जैसी sites पर page कब "ready" हुआ। पहले हर navigation पर `networkidle` का इंतज़ार होता था जो 10-30 seconds बर्बाद करता था क्योंकि modern sites कभी truly idle नहीं होतीं। अब site-specific CSS selectors check होते हैं — जैसे LinkedIn का `.scaffold-layout__main` या Gmail का `[role="navigation"]`। यह automatic है, लेकिन अगर तुम कोई नई site बार-बार automate करते हो तो `src/readiness.ts` में उसका selector add कर सकते हो। दूसरा — `.env` में `EVIDENCE_MODE=selective` set करो तो server सिर्फ errors और approval gates पर screenshots लेगा, हर step पर नहीं। और tools अब ज़्यादा data वापस भेजते हैं — navigate करने के बाद अलग से `getPageInfo` call करने की ज़रूरत नहीं।
-
-Performance side में — `FAST_MODE=true` अब zero delays देता है, checkpoints हर तीसरे step पर लिखता है, और evidence `EVIDENCE_MODE` follow करता है। सबसे critical fix: जब Claude Desktop server spawn करता था तो `process.cwd()` `C:\WINDOWS\system32` होता था और `data/` folder वहाँ बनाने की कोशिश में EPERM crash होता था। अब सब paths `import.meta.url` से resolve होते हैं — `src/env.ts` में `DATA_ROOT` centralized है। Tool names में dots (`task.list`) थे जो Claude Desktop reject करता था — अब underscores हैं (`task_list`)।
-
----
-
 ## Execution Policy
 
 This server runs in **operator-first mode**.
