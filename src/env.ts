@@ -41,6 +41,9 @@ const envSchema = z.object({
   ),
   CHROME_CHANNEL: z.string().optional(),
 
+  // ── Performance ─────────────────────────────────────────────────
+  FAST_MODE: boolStr(false),
+
   // ── SSE transport ────────────────────────────────────────────────
   MCP_USE_SSE: boolStr(true),
   MCP_SSE_PORT: numStr(3456),

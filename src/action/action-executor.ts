@@ -2,6 +2,7 @@ import type { ToolResult, ContextName } from '../types/common.js';
 import type { SessionManager } from '../session/session-manager.js';
 import type { MetricsEngine } from '../metrics/metrics-engine.js';
 import { withRetry } from './retry.js';
+import { env } from '../env.js';
 import { homedir } from 'os';
 import { join } from 'path';
 import { mkdirSync } from 'fs';
@@ -37,7 +38,7 @@ export class ActionExecutor {
 
       if (opts?.waitFor) {
         await page.waitForSelector(opts.waitFor, { state: 'visible', timeout: 10000 });
-      } else {
+      } else if (!env.FAST_MODE) {
         await page.waitForLoadState('networkidle').catch(() => {});
       }
 
@@ -63,7 +64,8 @@ export class ActionExecutor {
         const page = await this.sessionManager.getPage(contextName);
         await this.sessionManager.humanDelay();
 
-        if (opts?.waitForNav !== false) {
+        const shouldWaitForNav = opts?.waitForNav ?? !env.FAST_MODE;
+        if (shouldWaitForNav) {
           await Promise.all([
             page.waitForNavigation({ timeout: opts?.timeout || 10000 }).catch(() => {}),
             page.click(selector),

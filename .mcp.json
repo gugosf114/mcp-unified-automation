@@ -13,7 +13,8 @@
         "CHROME_USER_DATA_DIR": "C:\\Users\\georg\\AppData\\Local\\mcp-unified-automation\\chrome-profile",
         "CHROME_CHANNEL": "chrome",
         "HEADLESS": "false",
-        "MCP_USE_SSE": "false"
+        "MCP_USE_SSE": "false",
+        "FAST_MODE": "true"
       }
     }
   }

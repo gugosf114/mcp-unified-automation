@@ -172,7 +172,9 @@ export class SessionManager {
     const homeUrl = handle.homeUrl;
     if (homeUrl && handle.page.url() !== homeUrl) {
       await handle.page.goto(homeUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
-      await handle.page.waitForLoadState('networkidle').catch(() => {});
+      if (!env.FAST_MODE) {
+        await handle.page.waitForLoadState('networkidle').catch(() => {});
+      }
     }
     return handle;
   }
@@ -222,7 +224,7 @@ export class SessionManager {
 
       if (waitFor) {
         await page.waitForSelector(waitFor, { state: 'visible', timeout: 10000 });
-      } else {
+      } else if (!env.FAST_MODE) {
         await page.waitForLoadState('networkidle').catch(() => {});
       }
 
@@ -301,10 +303,14 @@ export class SessionManager {
 
       if (submitSelector) {
         await this.humanDelay();
-        await Promise.all([
-          page.waitForNavigation({ timeout: 15000 }).catch(() => {}),
-          page.click(submitSelector),
-        ]);
+        if (!env.FAST_MODE) {
+          await Promise.all([
+            page.waitForNavigation({ timeout: 15000 }).catch(() => {}),
+            page.click(submitSelector),
+          ]);
+        } else {
+          await page.click(submitSelector);
+        }
       }
 
       return {
@@ -323,7 +329,8 @@ export class SessionManager {
       const page = await this.getPage();
       await this.humanDelay();
 
-      if (waitAfter) {
+      const shouldWaitForNav = waitAfter && !env.FAST_MODE;
+      if (shouldWaitForNav) {
         await Promise.all([
           page.waitForNavigation({ timeout: 10000 }).catch(() => {}),
           page.click(selector),

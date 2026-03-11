@@ -47,10 +47,13 @@ BROWSER_HEADED=true            # Show the browser window
 BROWSER_BLOCK_MEDIA=false      # Block images/video to speed up crawls
 HUMAN_DELAY_MIN=50             # ms â€” min delay between actions
 HUMAN_DELAY_MAX=200            # ms â€” max delay (human-like pacing)
-CHROME_USER_DATA_DIR=C:\Users\georg\AppData\Local\Google\Chrome\User Data
+FAST_MODE=true                 # Skip networkidle waits + nav waits on click (10x faster)
+CHROME_USER_DATA_DIR=C:\Users\georg\AppData\Local\mcp-unified-automation\chrome-profile
 ```
 
-`CHROME_USER_DATA_DIR` is the key one â€” points to the real Chrome profile so sessions, cookies, and logins carry over.
+`CHROME_USER_DATA_DIR` points to a dedicated Chrome profile so sessions, cookies, and logins carry over. Must NOT be Chrome's default user-data-dir (Chrome blocks DevTools on it).
+
+`FAST_MODE` skips Playwright's `networkidle` wait after every navigation and click. Modern sites (GA4, Gmail, etc.) never truly go network-idle due to analytics pings and websockets, so the default behavior just burns 10-30 seconds hitting the timeout. With FAST_MODE, pages are interactable as soon as the DOM loads.
 
 ---
 
