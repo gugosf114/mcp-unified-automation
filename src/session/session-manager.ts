@@ -4,6 +4,7 @@ import { homedir } from 'os';
 import { join } from 'path';
 import type { ToolResult, ContextName, PageHandle } from '../types/common.js';
 import { env } from '../env.js';
+import { waitForReadiness } from '../readiness.js';
 
 /**
  * SessionManager — single persistent BrowserContext, multiple named page slots.
@@ -172,7 +173,9 @@ export class SessionManager {
     const homeUrl = handle.homeUrl;
     if (homeUrl && handle.page.url() !== homeUrl) {
       await handle.page.goto(homeUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
-      if (!env.FAST_MODE) {
+      // Try domain-specific readiness first; fall back to networkidle only if no profile
+      const readiness = await waitForReadiness(handle.page, homeUrl);
+      if (!readiness.profileMatched && !env.FAST_MODE) {
         await handle.page.waitForLoadState('networkidle').catch(() => {});
       }
     }
@@ -222,18 +225,29 @@ export class SessionManager {
       const page = await this.getPage();
       await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 });
 
+      let readinessResult: { profileMatched: boolean; selectorFound: boolean; domain?: string } = { profileMatched: false, selectorFound: false };
       if (waitFor) {
         await page.waitForSelector(waitFor, { state: 'visible', timeout: 10000 });
-      } else if (!env.FAST_MODE) {
-        await page.waitForLoadState('networkidle').catch(() => {});
+      } else {
+        // Try domain-specific readiness; fall back to networkidle only if no profile
+        readinessResult = await waitForReadiness(page, url);
+        if (!readinessResult.profileMatched && !env.FAST_MODE) {
+          await page.waitForLoadState('networkidle').catch(() => {});
+        }
       }
 
       const title = await page.title();
       const currentUrl = page.url();
+      const readyState = await page.evaluate(() => document.readyState);
 
       return {
         status: "success",
-        data: { title, url: currentUrl },
+        data: {
+          title, url: currentUrl, readyState,
+          readiness: readinessResult.profileMatched
+            ? { matched: true, selectorFound: readinessResult.selectorFound, domain: readinessResult.domain }
+            : { matched: false },
+        },
         duration_ms: Date.now() - start,
       };
     } catch (error: any) {
@@ -313,9 +327,15 @@ export class SessionManager {
         }
       }
 
+      const currentUrl = (await this.getPage()).url();
       return {
         status: "success",
-        data: { filled_fields: filled, submitted: !!submitSelector },
+        data: {
+          filled_fields: filled,
+          fieldCount: filled.length,
+          submitted: !!submitSelector,
+          url: currentUrl,
+        },
         duration_ms: Date.now() - start,
       };
     } catch (error: any) {
@@ -327,6 +347,7 @@ export class SessionManager {
     const start = Date.now();
     try {
       const page = await this.getPage();
+      const urlBefore = page.url();
       await this.humanDelay();
 
       const shouldWaitForNav = waitAfter && !env.FAST_MODE;
@@ -339,9 +360,15 @@ export class SessionManager {
         await page.click(selector);
       }
 
+      const urlAfter = page.url();
       return {
         status: "success",
-        data: { clicked: selector, url: page.url() },
+        data: {
+          clicked: selector,
+          url: urlAfter,
+          navigationOccurred: urlAfter !== urlBefore,
+          selectorMatched: true,
+        },
         duration_ms: Date.now() - start,
       };
     } catch (error: any) {

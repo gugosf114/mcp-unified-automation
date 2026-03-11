@@ -3,6 +3,7 @@ import type { SessionManager } from '../session/session-manager.js';
 import type { MetricsEngine } from '../metrics/metrics-engine.js';
 import { withRetry } from './retry.js';
 import { env } from '../env.js';
+import { waitForReadiness } from '../readiness.js';
 import { homedir } from 'os';
 import { join } from 'path';
 import { mkdirSync } from 'fs';
@@ -36,16 +37,26 @@ export class ActionExecutor {
         timeout: opts?.timeout || 30000,
       });
 
+      let readinessResult: { profileMatched: boolean; selectorFound: boolean; domain?: string } = { profileMatched: false, selectorFound: false };
       if (opts?.waitFor) {
         await page.waitForSelector(opts.waitFor, { state: 'visible', timeout: 10000 });
-      } else if (!env.FAST_MODE) {
-        await page.waitForLoadState('networkidle').catch(() => {});
+      } else {
+        readinessResult = await waitForReadiness(page, url);
+        if (!readinessResult.profileMatched && !env.FAST_MODE) {
+          await page.waitForLoadState('networkidle').catch(() => {});
+        }
       }
 
       const title = await page.title();
+      const readyState = await page.evaluate(() => document.readyState);
       return {
         status: "success",
-        data: { title, url: page.url() },
+        data: {
+          title, url: page.url(), readyState,
+          readiness: readinessResult.profileMatched
+            ? { matched: true, selectorFound: readinessResult.selectorFound, domain: readinessResult.domain }
+            : { matched: false },
+        },
         duration_ms: Date.now() - start,
       };
     } catch (error: any) {
@@ -62,6 +73,7 @@ export class ActionExecutor {
       const start = Date.now();
       try {
         const page = await this.sessionManager.getPage(contextName);
+        const urlBefore = page.url();
         await this.sessionManager.humanDelay();
 
         const shouldWaitForNav = opts?.waitForNav ?? !env.FAST_MODE;
@@ -74,9 +86,15 @@ export class ActionExecutor {
           await page.click(selector);
         }
 
+        const urlAfter = page.url();
         return {
           status: "success",
-          data: { clicked: selector, url: page.url() },
+          data: {
+            clicked: selector,
+            url: urlAfter,
+            navigationOccurred: urlAfter !== urlBefore,
+            selectorMatched: true,
+          },
           duration_ms: Date.now() - start,
         };
       } catch (error: any) {

@@ -56,6 +56,10 @@ const envSchema = z.object({
   // ── Performance ─────────────────────────────────────────────────
   FAST_MODE: boolStr(false),
 
+  // ── Evidence recording ────────────────────────────────────────
+  // full: every step (default), selective: errors/approvals/first/last only, none: skip all
+  EVIDENCE_MODE: z.enum(['full', 'selective', 'none']).default('full'),
+
   // ── SSE transport ────────────────────────────────────────────────
   MCP_USE_SSE: boolStr(true),
   MCP_SSE_PORT: numStr(3456),

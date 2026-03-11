@@ -371,8 +371,9 @@ export class TaskRunner {
     try {
       const result = await stepFn(ctx, this.actionExecutor, this.sessionManager);
 
-      // Record evidence for each step (skip in FAST_MODE to reduce I/O)
-      if (!env.FAST_MODE) {
+      // Record evidence based on EVIDENCE_MODE:
+      //   full: every step | selective: errors, approvals, first/last | none: skip
+      if (this.shouldRecordEvidence(stepName, stepIndex, result.status)) {
         await this.evidenceLedger.recordAction(this.taskId, stepIndex, stepName, {
           status: result.status,
           entityIndex: this.currentEntityIndex,
@@ -534,6 +535,18 @@ export class TaskRunner {
     const entry = this.spec.steps[index];
     if (!entry) return 'unknown';
     return typeof entry === 'string' ? entry : entry.step;
+  }
+
+  private shouldRecordEvidence(stepName: string, stepIndex: number, status: string): boolean {
+    const mode = env.EVIDENCE_MODE ?? (env.FAST_MODE ? 'none' : 'full');
+    if (mode === 'none') return false;
+    if (mode === 'full') return true;
+    // selective: record on errors, approval gates, first step, last step
+    if (status === 'error') return true;
+    if (this.policyGate.requiresApproval(stepName)) return true;
+    if (stepIndex === 0) return true;
+    if (stepIndex === this.spec.steps.length - 1) return true;
+    return false;
   }
 
   private async computeCookiesHash(): Promise<string> {
