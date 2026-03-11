@@ -16,7 +16,7 @@ export function registerTaskManagementTools(
 ) {
 
   server.tool(
-    "task.list",
+    "task_list",
     "List all known tasks — both active (in-memory) and checkpointed (on-disk). " +
     "Shows task ID, status, and progress for each.",
     {},
@@ -46,7 +46,7 @@ export function registerTaskManagementTools(
   );
 
   server.tool(
-    "task.status",
+    "task_status",
     "Get detailed status of a specific task: current step, entity progress, " +
     "whether it's paused/running/awaiting approval, etc.",
     {
@@ -75,7 +75,7 @@ export function registerTaskManagementTools(
                     pageUrl: checkpoint.pageUrl,
                     processedEntities: checkpoint.processedEntities.length,
                   },
-                  note: 'Task is not in memory. Use task.resume to continue.',
+                  note: 'Task is not in memory. Use task_resume to continue.',
                 },
               }, null, 2),
             }],
@@ -93,7 +93,7 @@ export function registerTaskManagementTools(
   );
 
   server.tool(
-    "task.cancel",
+    "task_cancel",
     "Cancel a task. Stops execution and cleans up. The checkpoint is preserved " +
     "so the task can be resumed later if needed.",
     {
