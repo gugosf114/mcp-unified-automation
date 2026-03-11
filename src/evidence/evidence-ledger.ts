@@ -1,13 +1,8 @@
 import { mkdirSync, appendFileSync, readFileSync, existsSync, writeFileSync, readdirSync, renameSync } from 'fs';
-import { join, dirname } from 'path';
-import { fileURLToPath } from 'url';
+import { join } from 'path';
 import { createHash, randomUUID } from 'crypto';
+import { DATA_ROOT } from '../env.js';
 import type { Page } from 'playwright';
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = dirname(__filename);
-// Repo root = two levels up from src/evidence/
-const REPO_ROOT = join(__dirname, '..', '..');
 
 export interface EvidenceRecord {
   id: string;
@@ -42,7 +37,7 @@ export class EvidenceLedger {
   private counters: Map<string, number> = new Map();
 
   constructor(baseDir?: string) {
-    this.baseDir = baseDir || join(REPO_ROOT, 'data', 'evidence');
+    this.baseDir = baseDir || join(DATA_ROOT, 'evidence');
     mkdirSync(this.baseDir, { recursive: true });
   }
 

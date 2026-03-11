@@ -1,6 +1,18 @@
 import { z } from 'zod';
 import { homedir } from 'os';
-import { join } from 'path';
+import { join, dirname, resolve } from 'path';
+import { fileURLToPath } from 'url';
+
+// Stable repo root derived from module location, not cwd.
+// dist/env.js -> one level up -> repo root
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+const REPO_ROOT = resolve(__dirname, '..');
+
+/** Writable data directory — override via env var or defaults to {repo}/data */
+export const DATA_ROOT =
+  process.env.UNIFIED_AUTOMATION_DATA_DIR ??
+  join(REPO_ROOT, 'data');
 
 /**
  * Centralized environment validation via Zod.

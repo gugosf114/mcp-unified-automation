@@ -1,7 +1,6 @@
 import { mkdirSync, appendFileSync, readFileSync, existsSync, statSync, renameSync } from 'fs';
 import { join } from 'path';
-
-const PROJECT_ROOT = process.cwd();
+import { DATA_ROOT } from '../env.js';
 
 export interface StepMetric {
   taskId: string;
@@ -45,7 +44,7 @@ export class MetricsEngine {
   private maxFileSizeBytes: number;
 
   constructor(baseDir?: string, maxFileSizeMB: number = 10) {
-    this.dir = baseDir || join(PROJECT_ROOT, 'data', 'metrics');
+    this.dir = baseDir || join(DATA_ROOT, 'metrics');
     mkdirSync(this.dir, { recursive: true });
     this.logFile = join(this.dir, 'metrics.ndjson');
     this.maxFileSizeBytes = maxFileSizeMB * 1024 * 1024;
