@@ -108,12 +108,44 @@ src/
 
 ---
 
+## What's New (March 2026)
+
+### Features you can use
+
+- **Domain readiness profiles** (`src/readiness.ts`) — The server now knows how to wait for LinkedIn, Gmail, Google Search, GitHub, Yelp, Facebook, and Instagram. Instead of waiting for `networkidle` (which times out on every modern site), it waits for the actual content selector that proves the page loaded. You don't call this directly — it fires automatically on every `navigate`, `goto`, and `warm` call. If you add a new site you automate frequently, add its selector to `readiness.ts`.
+
+- **Selective evidence mode** — New `.env` setting `EVIDENCE_MODE=selective` records screenshots/DOM snapshots only on errors, approval gates, and the first/last step of a task. Set to `full` for audit trails, `none` to skip entirely. Controlled in `.env`, no code changes needed.
+
+- **Semantic tool returns** — `browser_navigate`, `browser_click`, and `session_open` now return richer data: `readyState`, whether navigation occurred, whether the readiness selector matched, the domain profile used. This means Claude doesn't need a follow-up `getPageInfo` call after every action — the info comes back in the tool response. Fewer round trips = faster task execution.
+
+- **Task management tools renamed** — `task.list` → `task_list`, `task.status` → `task_status`, `task.cancel` → `task_cancel`. Claude Desktop rejects dots in tool names. If you had prompts referencing the old names, update them.
+
+### Performance & safety (automatic, no action needed)
+
+- **FAST_MODE** — When `FAST_MODE=true` in `.env`: zero human delays, skip `networkidle` waits, sparse checkpoint writes (every 3rd step instead of every step), evidence recording follows `EVIDENCE_MODE` setting. Already enabled in your `.env`.
+
+- **Stable path resolution** — Data directories (`data/checkpoints/`, `data/evidence/`) now resolve from the module's own location (`import.meta.url`), not `process.cwd()`. This fixed the crash when Claude Desktop spawned the server from `C:\WINDOWS\system32`. Centralized in `src/env.ts` as `DATA_ROOT`.
+
+- **Retry with exponential backoff** (`src/action/retry.ts`) — Network-sensitive actions auto-retry on transient failures.
+
+- **Conditional steps & parallel runner** — Task DSL now supports `condition` fields on steps and a parallel step executor for independent actions.
+
+---
+
 ## Notes
 
-- `browser_*` tools use a `"default"` page slot for backward compatibility â€” existing Claude prompts that call `browser_navigate` etc. still work unchanged.
-- The task engine supports mid-run pause/resume â€” useful for long multi-step jobs that might hit context limits.
+- `browser_*` tools use a `”default”` page slot for backward compatibility — existing Claude prompts that call `browser_navigate` etc. still work unchanged.
+- The task engine supports mid-run pause/resume — useful for long multi-step jobs that might hit context limits.
 - Evidence ledger produces a hash-chained audit trail of every browser action. Useful for compliance work.
 - Recovery module handles reconnect after Claude Code crashes or context resets.
+
+---
+
+## हिंदी में सारांश (Summary in Hindi)
+
+सबसे ज़रूरी बात — अब server को पता है कि LinkedIn, Gmail, Google Search, GitHub जैसी sites पर page कब "ready" हुआ। पहले हर navigation पर `networkidle` का इंतज़ार होता था जो 10-30 seconds बर्बाद करता था क्योंकि modern sites कभी truly idle नहीं होतीं। अब site-specific CSS selectors check होते हैं — जैसे LinkedIn का `.scaffold-layout__main` या Gmail का `[role="navigation"]`। यह automatic है, लेकिन अगर तुम कोई नई site बार-बार automate करते हो तो `src/readiness.ts` में उसका selector add कर सकते हो। दूसरा — `.env` में `EVIDENCE_MODE=selective` set करो तो server सिर्फ errors और approval gates पर screenshots लेगा, हर step पर नहीं। और tools अब ज़्यादा data वापस भेजते हैं — navigate करने के बाद अलग से `getPageInfo` call करने की ज़रूरत नहीं।
+
+Performance side में — `FAST_MODE=true` अब zero delays देता है, checkpoints हर तीसरे step पर लिखता है, और evidence `EVIDENCE_MODE` follow करता है। सबसे critical fix: जब Claude Desktop server spawn करता था तो `process.cwd()` `C:\WINDOWS\system32` होता था और `data/` folder वहाँ बनाने की कोशिश में EPERM crash होता था। अब सब paths `import.meta.url` से resolve होते हैं — `src/env.ts` में `DATA_ROOT` centralized है। Tool names में dots (`task.list`) थे जो Claude Desktop reject करता था — अब underscores हैं (`task_list`)।
 
 ---
 
