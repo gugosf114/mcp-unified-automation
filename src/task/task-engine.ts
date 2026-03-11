@@ -107,10 +107,22 @@ export class TaskEngine {
         this.stepRegistry,
       );
 
+      // Validate all steps exist before starting execution
+      const stepNames = spec.steps.map((s: any) => typeof s === 'string' ? s : s.step);
+      const unknownSteps = stepNames.filter((s: string) => !this.stepRegistry.has(s));
+      if (unknownSteps.length > 0) {
+        return {
+          status: 'error',
+          taskId: spec.taskId,
+          error: `Unknown steps: ${unknownSteps.join(', ')}. Available: ${this.stepRegistry.listSteps().join(', ')}`,
+        };
+      }
+
       this.runners.set(spec.taskId, runner);
       this.notify('info', { event: 'task_started', taskId: spec.taskId, steps: spec.steps.length });
       const result = await runner.run();
       this.notifyResult(spec.taskId, result);
+      this.cleanupIfTerminal(spec.taskId);
       return result;
     } catch (error: any) {
       return { status: 'error', error: error.message };
@@ -155,7 +167,9 @@ export class TaskEngine {
         this.runners.set(taskId, runner);
       }
 
-      return runner.resume();
+      const result = await runner.resume();
+      this.cleanupIfTerminal(taskId);
+      return result;
     } catch (error: any) {
       return { status: 'error', taskId, error: error.message };
     }
@@ -200,6 +214,7 @@ export class TaskEngine {
     // Resume the runner
     const result = await runner.onApproval();
     this.notifyResult(taskId, result);
+    this.cleanupIfTerminal(taskId);
     return result;
   }
 
@@ -237,6 +252,18 @@ export class TaskEngine {
     this.runners.delete(taskId);
     this.notify('info', { event: 'task_cancelled', taskId });
     return { status: 'success', taskId, data: { message: `Task ${taskId} cancelled` } };
+  }
+
+  /**
+   * Remove runners in terminal states to prevent memory leaks.
+   */
+  private cleanupIfTerminal(taskId: string): void {
+    const runner = this.runners.get(taskId);
+    if (!runner) return;
+    const terminal: string[] = ['completed', 'failed', 'cancelled'];
+    if (terminal.includes(runner.status)) {
+      this.runners.delete(taskId);
+    }
   }
 
   private notifyResult(taskId: string, result: ToolResult): void {

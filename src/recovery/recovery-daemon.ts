@@ -7,7 +7,7 @@ import type { MetricsEngine } from '../metrics/metrics-engine.js';
 
 export interface RecoveryPlaybook {
   name: string;
-  detect: (page: Page) => Promise<boolean>;
+  detect: (page: Page, contextName: ContextName) => Promise<boolean>;
   recover: (page: Page, executor: ActionExecutor, contextName: ContextName) => Promise<boolean>;
 }
 
@@ -81,7 +81,7 @@ export class RecoveryDaemon {
 
     for (const playbook of this.playbooks) {
       try {
-        const detected = await playbook.detect(page);
+        const detected = await playbook.detect(page, contextName);
         if (detected) {
           console.error(`[RecoveryDaemon] Detected: ${playbook.name} on ${contextName}`);
           const recovered = await playbook.recover(page, this.actionExecutor, contextName);
@@ -110,7 +110,7 @@ export class RecoveryDaemon {
     // 1. Captcha detector
     this.playbooks.push({
       name: 'captcha_detected',
-      detect: async (page) => {
+      detect: async (page, _contextName) => {
         try {
           const hasCaptcha = await page.evaluate(() => {
             return !!(
@@ -135,7 +135,7 @@ export class RecoveryDaemon {
     // 2. Stall detector (page stuck loading for >30s)
     this.playbooks.push({
       name: 'page_stall',
-      detect: async (page) => {
+      detect: async (page, _contextName) => {
         try {
           const readyState = await page.evaluate(() => document.readyState);
           // If page is still 'loading' and we've been stuck, it's a stall
@@ -153,7 +153,7 @@ export class RecoveryDaemon {
     // 3. Session expiry detector
     this.playbooks.push({
       name: 'session_expired',
-      detect: async (page) => {
+      detect: async (page, _contextName) => {
         try {
           const hasExpiry = await page.evaluate(() => {
             const text = document.body?.innerText?.toLowerCase() || '';
@@ -177,7 +177,7 @@ export class RecoveryDaemon {
     // 4. Navigation loop detector
     this.playbooks.push({
       name: 'navigation_loop',
-      detect: async (page) => {
+      detect: async (page, _contextName) => {
         // Find which context owns this page by matching the URL in our history
         let matchedHistory: Array<{ url: string; time: number }> | undefined;
         for (const [_ctxName, history] of this.urlHistory.entries()) {
@@ -206,7 +206,7 @@ export class RecoveryDaemon {
     // 5. Network error detector (DNS, connection refused, timeout, SSL)
     this.playbooks.push({
       name: 'network_error',
-      detect: async (page) => {
+      detect: async (page, _contextName) => {
         try {
           const hasNetError = await page.evaluate(() => {
             const body = document.body?.innerText || '';
@@ -259,7 +259,7 @@ export class RecoveryDaemon {
     // 6. Anti-bot / rate-limit detector (Cloudflare, LinkedIn walls, generic blocks)
     this.playbooks.push({
       name: 'anti_bot',
-      detect: async (page) => {
+      detect: async (page, _contextName) => {
         try {
           const blockType = await page.evaluate(() => {
             const body = document.body?.innerText?.toLowerCase() || '';
@@ -318,7 +318,7 @@ export class RecoveryDaemon {
     // 7. Cookie consent auto-dismiss
     this.playbooks.push({
       name: 'cookie_consent',
-      detect: async (page) => {
+      detect: async (page, _contextName) => {
         try {
           return await page.evaluate(() => {
             // Common cookie consent frameworks: OneTrust, CookieBot, CookieYes, Osano, etc.

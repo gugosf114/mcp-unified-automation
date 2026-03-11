@@ -96,7 +96,15 @@ export class TaskRunner {
 
     // Restore state from checkpoint
     this.currentEntityIndex = checkpoint.entityIndex;
-    this.currentStepIndex = checkpoint.stepIndex + 1; // resume AFTER the checkpointed step
+
+    // If the checkpointed step was an approval gate, re-present it
+    // instead of skipping past it — prevents bypassing human approval after crash
+    const checkpointedStepName = checkpoint.stepName || this.resolveStepName(checkpoint.stepIndex);
+    if (this.policyGate.requiresApproval(checkpointedStepName)) {
+      this.currentStepIndex = checkpoint.stepIndex; // re-enter the gate
+    } else {
+      this.currentStepIndex = checkpoint.stepIndex + 1; // resume AFTER the checkpointed step
+    }
     this.formState = checkpoint.formState;
     this.processedKeys = checkpoint.processedEntities;
     this._status = 'running';
@@ -509,8 +517,10 @@ export class TaskRunner {
 
     let key = this.spec.idempotency.key;
     // Replace {{field}} placeholders with entity values
+    // Use explicit null/undefined check — || 'unknown' would swallow 0, false, ""
     key = key.replace(/\{\{(\w+)\}\}/g, (_match, field) => {
-      return String(entity[field] || 'unknown');
+      const val = entity[field];
+      return val != null ? String(val) : 'unknown';
     });
     return key;
   }

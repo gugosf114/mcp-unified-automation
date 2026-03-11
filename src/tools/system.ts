@@ -14,12 +14,24 @@ const BLOCKED_PATTERNS = [
   'remove-item -recurse -force c:\\',
 ];
 
+/**
+ * Escape a string for safe embedding in a PowerShell single-quoted literal.
+ * In PS, the only escape inside '...' is doubling the quote: ' → ''
+ */
+function psSingleQuote(value: string): string {
+  return value.replace(/'/g, "''");
+}
+
 function validateCommand(command: string): { allowed: boolean; reason?: string } {
   const lower = command.toLowerCase().trim();
   for (const blocked of BLOCKED_PATTERNS) {
     if (lower.includes(blocked)) {
       return { allowed: false, reason: `Blocked destructive pattern: ${blocked}` };
     }
+  }
+  // Block backtick escapes and multiline sequences that could bypass single-quote safety
+  if (/[`\r\n]/.test(command)) {
+    return { allowed: false, reason: 'Backtick escapes and multiline commands are not allowed' };
   }
   return { allowed: true };
 }
@@ -97,7 +109,7 @@ export function registerSystemTools(server: McpServer) {
     },
     async ({ directory, min_size_mb, recursive }) => {
       const recurse = recursive ? '-Recurse' : '';
-      const cmd = `Get-ChildItem -Path '${directory}' ${recurse} -File -ErrorAction SilentlyContinue | Where-Object { $_.Length -gt ${min_size_mb * 1024 * 1024} } | Sort-Object Length -Descending | Select-Object FullName, @{N='SizeMB';E={[math]::Round($_.Length/1MB, 2)}} | ConvertTo-Json`;
+      const cmd = `Get-ChildItem -Path '${psSingleQuote(directory)}' ${recurse} -File -ErrorAction SilentlyContinue | Where-Object { $_.Length -gt ${min_size_mb * 1024 * 1024} } | Sort-Object Length -Descending | Select-Object FullName, @{N='SizeMB';E={[math]::Round($_.Length/1MB, 2)}} | ConvertTo-Json`;
       const result = await runCommand(cmd, 60000);
       return { content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }] };
     }
@@ -129,7 +141,7 @@ export function registerSystemTools(server: McpServer) {
     },
     async ({ directory, pattern, recursive }) => {
       const recurse = recursive ? '-Recurse' : '';
-      const cmd = `Get-ChildItem -Path '${directory}' -Filter '${pattern}' ${recurse} -File -ErrorAction SilentlyContinue | Select-Object FullName, @{N='SizeMB';E={[math]::Round($_.Length/1MB, 2)}}, LastWriteTime | ConvertTo-Json`;
+      const cmd = `Get-ChildItem -Path '${psSingleQuote(directory)}' -Filter '${psSingleQuote(pattern)}' ${recurse} -File -ErrorAction SilentlyContinue | Select-Object FullName, @{N='SizeMB';E={[math]::Round($_.Length/1MB, 2)}}, LastWriteTime | ConvertTo-Json`;
       const result = await runCommand(cmd, 60000);
       return { content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }] };
     }

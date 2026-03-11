@@ -12,6 +12,7 @@ import { BUILTIN_PROFILES, type BlockProfile } from './block-profiles.js';
  */
 export class NetworkOrchestrator {
   private activeProfiles: Map<ContextName, string> = new Map();
+  private routeHandlers: Array<{ pattern: string; handler: (route: any) => void }> = [];
 
   constructor(
     private sessionManager: SessionManager,
@@ -29,28 +30,32 @@ export class NetworkOrchestrator {
       throw new Error('Browser not launched yet');
     }
 
+    // Clear previous route handlers to prevent leaking stacked handlers
+    await this.clearRoutes(ctx);
+
     // Apply each blocking rule via Playwright route interception
     for (const rule of profile.rules) {
       if (rule.action !== 'block') continue;
 
+      let routePattern: string | undefined;
+
       if (rule.type === 'domain') {
-        await ctx.route(`**/${rule.pattern}/**`, route => route.abort());
+        routePattern = `**/${rule.pattern}/**`;
       } else if (rule.type === 'url_pattern') {
-        await ctx.route(rule.pattern, route => route.abort());
+        routePattern = rule.pattern;
       } else if (rule.type === 'resource_type') {
-        // Resource type blocking uses a broader pattern
-        // and filters by resource type in the handler
-        // Note: Playwright routes don't directly filter by resource type
-        // at the route level, so we use known file extensions
         const extMap: Record<string, string> = {
           'font': '**/*.{woff,woff2,ttf,eot,otf}',
           'image': '**/*.{png,jpg,jpeg,gif,svg,ico,webp,avif}',
           'media': '**/*.{mp4,webm,ogg,mp3,wav,flac}',
         };
-        const pattern = extMap[rule.pattern];
-        if (pattern) {
-          await ctx.route(pattern, route => route.abort());
-        }
+        routePattern = extMap[rule.pattern];
+      }
+
+      if (routePattern) {
+        const handler = (route: any) => route.abort();
+        await ctx.route(routePattern, handler);
+        this.routeHandlers.push({ pattern: routePattern, handler });
       }
     }
 
@@ -66,6 +71,18 @@ export class NetworkOrchestrator {
     contentType: string;
   }>> {
     return this.cdpBridge.getApiEndpoints();
+  }
+
+  /**
+   * Remove all previously registered route handlers to prevent leaks.
+   */
+  private async clearRoutes(ctx: any): Promise<void> {
+    for (const { pattern, handler } of this.routeHandlers) {
+      try {
+        await ctx.unroute(pattern, handler);
+      } catch { /* handler may already be gone */ }
+    }
+    this.routeHandlers = [];
   }
 
   getActiveProfile(contextName: ContextName): string | undefined {

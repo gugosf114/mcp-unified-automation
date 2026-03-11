@@ -36,4 +36,40 @@ export function registerObserveTools(server: McpServer, observer: ObserverBus, s
       }
     }
   );
+
+  server.tool(
+    "observe_stop",
+    "Stop observing DOM mutations on a named session's page. " +
+    "Disconnects the MutationObserver and removes event listeners.",
+    {
+      context_name: z.string().describe("Session name to stop observing"),
+    },
+    async ({ context_name }) => {
+      try {
+        // Get the page so we can properly disconnect the in-page observer
+        let page;
+        try {
+          page = await session.getPage(context_name);
+        } catch { /* page may be closed — still flip the flag */ }
+
+        await observer.stopObserving(context_name, page);
+        return {
+          content: [{
+            type: "text" as const,
+            text: JSON.stringify({
+              status: "success",
+              data: { stopped: context_name },
+            }, null, 2),
+          }],
+        };
+      } catch (error: any) {
+        return {
+          content: [{
+            type: "text" as const,
+            text: JSON.stringify({ status: "error", error: error.message }, null, 2),
+          }],
+        };
+      }
+    }
+  );
 }
