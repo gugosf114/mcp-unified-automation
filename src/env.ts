@@ -2,12 +2,27 @@ import { z } from 'zod';
 import { homedir } from 'os';
 import { join, dirname, resolve } from 'path';
 import { fileURLToPath } from 'url';
+import { readFileSync, existsSync } from 'fs';
 
 // Stable repo root derived from module location, not cwd.
 // dist/env.js -> one level up -> repo root
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 const REPO_ROOT = resolve(__dirname, '..');
+
+// Auto-load .env from repo root (avoids Node --env-file backslash issues on Windows)
+const dotenvPath = join(REPO_ROOT, '.env');
+if (existsSync(dotenvPath)) {
+  for (const line of readFileSync(dotenvPath, 'utf-8').split(/\r?\n/)) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith('#')) continue;
+    const eqIdx = trimmed.indexOf('=');
+    if (eqIdx === -1) continue;
+    const key = trimmed.slice(0, eqIdx).trim();
+    const val = trimmed.slice(eqIdx + 1).trim();
+    if (!process.env[key]) process.env[key] = val;  // don't override real (non-empty) env
+  }
+}
 
 /** Writable data directory — override via env var or defaults to {repo}/data */
 export const DATA_ROOT =
@@ -66,6 +81,12 @@ const envSchema = z.object({
   MCP_SSE_HOST: z.string().default('127.0.0.1'),
   MCP_SSE_BEARER_TOKEN: z.string().optional(),
   MCP_PUBLIC_BASE_URL: z.string().optional(),
+
+  // ── API orchestrator ──────────────────────────────────────────────
+  ANTHROPIC_API_KEY: z.string().optional(),
+  ANTHROPIC_MODEL: z.string().default('claude-sonnet-4-6'),
+  ORCHESTRATOR_MAX_TURNS: numStr(50),
+  ORCHESTRATOR_TEMPERATURE: numStr(0),
 });
 
 export type Env = z.infer<typeof envSchema>;
