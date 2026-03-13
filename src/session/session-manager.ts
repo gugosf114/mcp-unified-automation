@@ -2,6 +2,7 @@ import { chromium, type Browser, type BrowserContext, type Page } from 'playwrig
 import { existsSync } from 'fs';
 import { homedir } from 'os';
 import { join } from 'path';
+import { exec } from 'child_process';
 import type { ToolResult, ContextName, PageHandle } from '../types/common.js';
 import { env } from '../env.js';
 import { waitForReadiness } from '../readiness.js';
@@ -87,10 +88,13 @@ export class SessionManager {
       return this.context;
     } catch (error: any) {
       if (error.message?.includes('ECONNREFUSED') || error.message?.includes('connect')) {
+        // Try to auto-launch Chrome with debug port before giving up
+        const launched = await this.tryAutoLaunchChrome(cdpUrl);
+        if (launched) return launched;
+
         throw new Error(
-          `Could not connect to Chrome at ${cdpUrl}. ` +
-          `Make sure Chrome is running with --remote-debugging-port=9222. ` +
-          `You can use LAUNCH_CHROME_DEBUG.bat to start it.\n` +
+          `Chrome is not running on ${cdpUrl}. ` +
+          `Run LAUNCH_CHROME_DEBUG.bat or install auto-start: INSTALL_CHROME_STARTUP.bat (run as admin once). ` +
           `Original: ${error.message.slice(0, 200)}`
         );
       }
@@ -181,6 +185,35 @@ export class SessionManager {
       this.context = null;
       this.pages.clear();
     }
+  }
+
+  /**
+   * If Chrome isn't running on the debug port, try to start it automatically.
+   * Waits up to 8 seconds for Chrome to become available.
+   */
+  private async tryAutoLaunchChrome(cdpUrl: string): Promise<BrowserContext | null> {
+    const chromePath = 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe';
+    if (!existsSync(chromePath)) return null;
+
+    console.error('[SessionManager] Chrome not on debug port — attempting auto-launch...');
+    exec(`"${chromePath}" --remote-debugging-port=9222 --restore-last-session`);
+
+    // Poll for Chrome to become available (up to 8 seconds)
+    for (let i = 0; i < 16; i++) {
+      await new Promise(r => setTimeout(r, 500));
+      try {
+        this.browser = await chromium.connectOverCDP(cdpUrl, { timeout: 3000 });
+        const contexts = this.browser.contexts();
+        if (contexts.length === 0) continue;
+        this.context = contexts[0];
+        this.cdpMode = true;
+        console.error('[SessionManager] Auto-launched Chrome and connected via CDP');
+        return this.context;
+      } catch {
+        // Chrome not ready yet, keep polling
+      }
+    }
+    return null;
   }
 
   /**

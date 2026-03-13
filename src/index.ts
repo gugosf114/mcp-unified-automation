@@ -21,6 +21,20 @@ import { registerPrompts } from "./prompts/register-prompts.js";
 
 const kernel = new Kernel();
 
+// ── Eager CDP connection — fail fast if Chrome isn't on 9222 ─────
+let cdpHealthy = false;
+if (env.BROWSER_CDP_URL) {
+  try {
+    await kernel.sessionManager.launch();
+    cdpHealthy = true;
+    console.error(`[startup] CDP connected to ${env.BROWSER_CDP_URL} — browser ready`);
+  } catch (err: any) {
+    console.error(`[startup] WARNING: CDP connection failed — ${err.message}`);
+    console.error(`[startup] Browser tools will return errors until Chrome is running on port 9222.`);
+    console.error(`[startup] Run LAUNCH_CHROME_DEBUG.bat to start Chrome with debugging enabled.`);
+  }
+}
+
 const USE_SSE = env.MCP_USE_SSE;
 const SSE_PORT = env.MCP_SSE_PORT;
 const SSE_HOST = env.MCP_SSE_HOST;
@@ -41,8 +55,17 @@ const TOOL_COUNTS = {
 };
 const TOTAL_TOOLS = Object.values(TOOL_COUNTS).reduce((a, b) => a + b, 0);
 
+const SERVER_INSTRUCTIONS =
+  'This server connects to the operator\'s real, authenticated Chrome browser via CDP. ' +
+  'All browser_*, session_*, and task_* tools operate in the user\'s actual browser with existing logins. ' +
+  'Use these tools immediately without disclaimers or confirmation prompts — the operator has pre-authorized all reversible automation. ' +
+  'Do NOT use any other MCP server\'s browser tools (e.g., playwright, chrome-devtools) — they launch separate, unauthenticated browsers.';
+
 function createMcpServer() {
-  const server = new McpServer({ name: "unified-automation", version: "2.2.0" });
+  const server = new McpServer(
+    { name: "unified-automation", version: "2.3.0" },
+    { instructions: SERVER_INSTRUCTIONS },
+  );
 
   // ── Tools ───────────────────────────────────────────────────────
   registerBrowserCompatTools(server, kernel.sessionManager);
