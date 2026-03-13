@@ -108,6 +108,30 @@ export class ActionExecutor {
     return action();
   }
 
+  async fill(contextName: ContextName, selector: string, value: string, opts?: {
+    retry?: boolean;
+  }): Promise<ToolResult> {
+    const action = async (): Promise<ToolResult> => {
+      const start = Date.now();
+      try {
+        const page = await this.sessionManager.getPage(contextName);
+        await this.sessionManager.humanDelay();
+        await page.fill(selector, value);
+        return {
+          status: "success",
+          data: { filled: selector, length: value.length },
+          duration_ms: Date.now() - start,
+        };
+      } catch (error: any) {
+        return { status: "error", error: error.message, duration_ms: Date.now() - start };
+      }
+    };
+    if (opts?.retry !== false) {
+      return withRetry(action, { maxAttempts: 3, backoffMs: 500 });
+    }
+    return action();
+  }
+
   async type(contextName: ContextName, selector: string, value: string, opts?: {
     clearFirst?: boolean;
     delay?: number;

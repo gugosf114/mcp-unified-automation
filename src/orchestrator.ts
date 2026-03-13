@@ -8,19 +8,15 @@
  * Control flow:
  *   User prompt → Claude API → tool_use → Kernel dispatch → tool_result → Claude API → ...
  *
- * Usage:
- *   const orch = new Orchestrator();
- *   const result = await orch.run("Scrape 5 LinkedIn profiles for ...");
+ * v3.0.0 — dispatch rewritten for 12 compound tools.
  */
 
 import Anthropic from '@anthropic-ai/sdk';
 import { Kernel } from './kernel.js';
 import { ALL_TOOLS } from './tool-defs.js';
 import { env } from './env.js';
-import { exec } from 'child_process';
-import { promisify } from 'util';
-
-const execAsync = promisify(exec);
+import { runActions, type WebAction } from './tools/web-act.js';
+import { runCommand } from './tools/system.js';
 
 // ── Types ──────────────────────────────────────────────────────────
 
@@ -210,11 +206,7 @@ export class Orchestrator {
     };
   }
 
-  /**
-   * Dispatch a tool call to the appropriate Kernel component.
-   * This is the bridge between Claude's tool_use responses and the
-   * existing Kernel infrastructure.
-   */
+  /** Detect model pushback / refusal patterns. */
   private looksLikePushback(text: string): boolean {
     const t = text.toLowerCase();
     const markers = [
@@ -233,163 +225,205 @@ export class Orchestrator {
     return markers.some(m => t.includes(m));
   }
 
+  /**
+   * Dispatch a tool call to the appropriate Kernel component.
+   * v3.0.0 — 12 compound tools.
+   */
   private async dispatch(name: string, input: Record<string, unknown>): Promise<unknown> {
     try {
       switch (name) {
-        // ── Browser compat ───────────────────────────────────────
-        case 'browser_navigate':
-          return await this.kernel.sessionManager.navigate(
-            input.url as string,
-            input.wait_for as string | undefined,
-          );
-        case 'browser_extract_content':
-          return await this.kernel.sessionManager.extractContent(
-            input.selector as string,
-            input.extract as string,
-            input.attribute as string | undefined,
-          );
-        case 'browser_fill_form':
-          return await this.kernel.sessionManager.fillForm(
-            input.fields as Record<string, string>,
-            input.submit_selector as string | undefined,
-          );
-        case 'browser_click':
-          return await this.kernel.sessionManager.click(
-            input.selector as string,
-            (input.wait_after as boolean) ?? true,
-          );
-        case 'browser_screenshot':
-          return await this.kernel.sessionManager.screenshot(
-            input.path as string | undefined,
-            (input.full_page as boolean) ?? false,
-          );
-        case 'browser_execute_script':
-          return await this.kernel.sessionManager.executeScript(
-            input.script as string,
-          );
-        case 'browser_get_page_info':
-          return await this.kernel.sessionManager.getPageInfo();
+        // ── web_read ──────────────────────────────────────────────
+        case 'web_read': {
+          const session = (input.session as string) || 'default';
+          const start = Date.now();
 
-        // ── Browser extended ─────────────────────────────────────
-        case 'browser_scroll':
-          return await this.kernel.actionExecutor.scroll('default', {
-            direction: ((input.direction as string) ?? 'down') as 'down' | 'up' | 'left' | 'right',
-            amount: (input.amount as number) ?? 500,
-            selector: input.selector as string | undefined,
-          });
-        case 'browser_hover':
-          return await this.kernel.actionExecutor.hover('default', input.selector as string);
-        case 'browser_keyboard':
-          return await this.kernel.actionExecutor.keyboard('default', input.key as string, {
-            modifiers: input.modifiers as ('Control' | 'Shift' | 'Alt' | 'Meta')[] | undefined,
-          });
-        case 'browser_select_option':
-          return await this.kernel.actionExecutor.select(
-            'default',
-            input.selector as string,
-            input.value as string,
-          );
-        case 'browser_upload':
-          return await this.kernel.actionExecutor.upload(
-            'default',
-            input.selector as string,
-            input.file_path as string,
-          );
-        case 'browser_download':
-          return await this.kernel.actionExecutor.download(
-            'default',
-            input.trigger_selector as string,
-            input.download_dir as string | undefined,
-          );
-        case 'browser_drag':
-          return await this.kernel.actionExecutor.drag(
-            'default',
-            input.source_selector as string,
-            input.target_selector as string,
-          );
-        case 'browser_wait_for_text':
-          return await this.kernel.actionExecutor.waitForText('default', input.text as string, {
-            selector: input.selector as string | undefined,
-            timeout: (input.timeout_ms as number) ?? 10000,
-          });
-        case 'browser_pdf':
-          return await this.kernel.actionExecutor.pdf('default', input.path as string | undefined);
-        case 'browser_accessibility_tree':
-          return await this.kernel.actionExecutor.accessibilityTree('default');
+          // Navigate if URL provided
+          let navResult;
+          if (input.url) {
+            navResult = await this.kernel.actionExecutor.goto(
+              session, input.url as string, { waitFor: input.wait_for as string | undefined }
+            );
+            if (navResult.status === 'error') return navResult;
+          }
 
-        // ── System ───────────────────────────────────────────────
-        case 'system_run_command': {
-          const { stdout, stderr } = await execAsync(input.command as string, {
-            shell: 'powershell.exe',
-            timeout: (input.timeout_ms as number) ?? 30000,
-            maxBuffer: 10 * 1024 * 1024,
-            windowsHide: true,
-          });
-          return { status: 'success', data: stdout.trim(), details: stderr.trim() || undefined };
-        }
-        case 'system_disk_usage':
-        case 'system_find_large_files':
-        case 'system_process_list':
-        case 'system_file_search':
-        case 'system_network_info':
-          // These are self-contained PowerShell commands — delegate via system_run_command
-          // The MCP tool functions build the PS command internally; we replicate minimally
-          return { status: 'error', error: `Use system_run_command with the appropriate PowerShell command instead of ${name} directly.` };
+          // Page info
+          const pageInfo = await this.kernel.actionExecutor.getPageInfo(session);
 
-        // ── Session ──────────────────────────────────────────────
-        case 'session_open': {
-          const handle = await this.kernel.sessionManager.open(input.context_name as string);
-          return { status: 'success', data: { contextName: handle.contextName, url: handle.page.url() } };
-        }
-        case 'session_warm': {
-          const handle = await this.kernel.sessionManager.warm(input.context_name as string);
-          return { status: 'success', data: { contextName: handle.contextName, url: handle.page.url() } };
-        }
+          // Extract content
+          const selector = (input.selector as string) || 'body';
+          const extract = (input.extract as string) || 'all';
+          const result: Record<string, any> = {
+            status: 'success',
+            page: pageInfo.data,
+            duration_ms: Date.now() - start,
+          };
 
-        // ── Task engine ──────────────────────────────────────────
-        case 'task_plan':
-          return await this.kernel.taskEngine.plan(input.spec as string);
-        case 'task_run':
-          return await this.kernel.taskEngine.run(input.spec as string);
-        case 'task_resume':
-          return await this.kernel.taskEngine.resume(input.task_id as string);
-        case 'task_pause':
-          return await this.kernel.taskEngine.pause(input.task_id as string);
-        case 'task_commit':
-          return await this.kernel.taskEngine.commit(input.task_id as string);
+          if (extract === 'all') {
+            const textResult = await this.kernel.actionExecutor.extractContent(session, selector, 'text');
+            const linkResult = await this.kernel.actionExecutor.extractContent(session, 'a', 'links');
+            result.text = textResult.status === 'success' ? textResult.data : null;
+            result.links = linkResult.status === 'success' ? linkResult.data : null;
+          } else {
+            const extractResult = await this.kernel.actionExecutor.extractContent(
+              session, selector, extract, input.attribute as string | undefined
+            );
+            result.content = extractResult.status === 'success' ? extractResult.data : null;
+          }
 
-        // ── Task management ──────────────────────────────────────
-        case 'task_list': {
-          const active = this.kernel.taskEngine.listTasks();
-          const checkpointed = await this.kernel.checkpointStore.list();
-          const activeIds = new Set(active.map(t => t.taskId));
-          const dormant = checkpointed.filter(id => !activeIds.has(id));
-          return { active, dormant };
-        }
-        case 'task_status':
-          return this.kernel.taskEngine.getStatus(input.task_id as string);
-        case 'task_cancel': {
-          const result = this.kernel.taskEngine.cancel(input.task_id as string);
-          if (input.delete_checkpoint) {
-            await this.kernel.checkpointStore.delete(input.task_id as string);
+          if (navResult?.data?.readiness) {
+            result.readiness = navResult.data.readiness;
           }
           return result;
         }
 
-        // ── Observe ──────────────────────────────────────────────
-        case 'observe_start': {
-          const page = await this.kernel.sessionManager.getPage(input.context_name as string);
-          await this.kernel.observerBus.startObserving(input.context_name as string, page);
-          return { status: 'success', data: { observing: input.context_name } };
-        }
-        case 'observe_stop': {
-          let page;
-          try { page = await this.kernel.sessionManager.getPage(input.context_name as string); } catch { /* page closed */ }
-          await this.kernel.observerBus.stopObserving(input.context_name as string, page);
-          return { status: 'success', data: { stopped: input.context_name } };
+        // ── web_act ───────────────────────────────────────────────
+        case 'web_act': {
+          const session = (input.session as string) || 'default';
+          const actions = input.actions as WebAction[];
+          return await runActions(actions, session, this.kernel.actionExecutor, {
+            screenshotOnError: (input.screenshot_on_error as boolean) ?? true,
+            screenshotFinal: (input.screenshot_final as boolean) ?? false,
+          });
         }
 
-        // ── Network ──────────────────────────────────────────────
+        // ── web_watch ─────────────────────────────────────────────
+        case 'web_watch': {
+          const session = (input.session as string) || 'default';
+          const include = (input.include as string[]) || ['screenshot', 'page_info'];
+          const start = Date.now();
+          const result: Record<string, any> = { status: 'success' };
+
+          if (include.includes('page_info')) {
+            const info = await this.kernel.actionExecutor.getPageInfo(session);
+            result.page = info.data;
+          }
+          if (include.includes('screenshot')) {
+            const shot = await this.kernel.actionExecutor.screenshot(
+              session, input.screenshot_path as string | undefined, (input.full_page as boolean) ?? false
+            );
+            result.screenshot = shot.data;
+          }
+          if (include.includes('accessibility_tree')) {
+            const tree = await this.kernel.actionExecutor.accessibilityTree(session);
+            result.accessibility_tree = tree.data;
+          }
+          result.duration_ms = Date.now() - start;
+          return result;
+        }
+
+        // ── web_script ────────────────────────────────────────────
+        case 'web_script': {
+          const session = (input.session as string) || 'default';
+          return await this.kernel.actionExecutor.evaluate(session, input.script as string);
+        }
+
+        // ── session ───────────────────────────────────────────────
+        case 'session': {
+          const cmd = input.command as string;
+          switch (cmd) {
+            case 'open': {
+              const handle = await this.kernel.sessionManager.open(input.name as string);
+              return { status: 'success', data: { command: 'open', contextName: handle.contextName, url: handle.page.url() } };
+            }
+            case 'warm': {
+              const handle = await this.kernel.sessionManager.warm(input.name as string);
+              return { status: 'success', data: { command: 'warm', contextName: handle.contextName, url: handle.page.url() } };
+            }
+            case 'list': {
+              const contexts = this.kernel.sessionManager.listContexts();
+              return { status: 'success', data: { command: 'list', sessions: contexts, count: contexts.length } };
+            }
+            case 'close': {
+              await this.kernel.sessionManager.closePage(input.name as string);
+              return { status: 'success', data: { command: 'close', closed: input.name } };
+            }
+            default:
+              return { status: 'error', error: `Unknown session command: ${cmd}` };
+          }
+        }
+
+        // ── task ──────────────────────────────────────────────────
+        case 'task': {
+          const cmd = input.command as string;
+          switch (cmd) {
+            case 'plan':
+              return await this.kernel.taskEngine.plan(input.spec as string);
+            case 'run':
+              return await this.kernel.taskEngine.run(input.spec as string);
+            case 'resume':
+              return await this.kernel.taskEngine.resume(input.task_id as string);
+            case 'pause':
+              return await this.kernel.taskEngine.pause(input.task_id as string);
+            case 'commit':
+              return await this.kernel.taskEngine.commit(input.task_id as string);
+            case 'status': {
+              const result = this.kernel.taskEngine.getStatus(input.task_id as string);
+              if (result.status === 'error') {
+                const checkpoint = await this.kernel.checkpointStore.load(input.task_id as string);
+                if (checkpoint) {
+                  return {
+                    status: 'success',
+                    data: {
+                      taskId: input.task_id,
+                      state: 'dormant',
+                      lastCheckpoint: {
+                        stepIndex: checkpoint.stepIndex,
+                        stepName: checkpoint.stepName,
+                        entityIndex: checkpoint.entityIndex,
+                        timestamp: checkpoint.timestamp,
+                        pageUrl: checkpoint.pageUrl,
+                        processedEntities: checkpoint.processedEntities.length,
+                      },
+                      note: 'Task is not in memory. Use task command "resume" to continue.',
+                    },
+                  };
+                }
+              }
+              return result;
+            }
+            case 'list': {
+              const active = this.kernel.taskEngine.listTasks();
+              const checkpointed = await this.kernel.checkpointStore.list();
+              const activeIds = new Set(active.map(t => t.taskId));
+              const dormant = checkpointed.filter(id => !activeIds.has(id));
+              return { status: 'success', data: { active, dormant, totalActive: active.length, totalDormant: dormant.length } };
+            }
+            case 'cancel': {
+              const result = this.kernel.taskEngine.cancel(input.task_id as string);
+              if (input.delete_checkpoint) {
+                await this.kernel.checkpointStore.delete(input.task_id as string);
+              }
+              return { ...result, checkpointDeleted: !!input.delete_checkpoint };
+            }
+            default:
+              return { status: 'error', error: `Unknown task command: ${cmd}` };
+          }
+        }
+
+        // ── system ────────────────────────────────────────────────
+        case 'system':
+          return await runCommand(
+            input.command as string,
+            (input.timeout_ms as number) ?? 30000,
+          );
+
+        // ── observe ───────────────────────────────────────────────
+        case 'observe': {
+          const cmd = input.command as string;
+          const ctxName = input.context_name as string;
+          if (cmd === 'start') {
+            const page = await this.kernel.sessionManager.getPage(ctxName);
+            await this.kernel.observerBus.startObserving(ctxName, page);
+            return { status: 'success', data: { command: 'start', observing: ctxName, url: page.url() } };
+          } else {
+            let page;
+            try { page = await this.kernel.sessionManager.getPage(ctxName); } catch { /* page closed */ }
+            await this.kernel.observerBus.stopObserving(ctxName, page);
+            return { status: 'success', data: { command: 'stop', stopped: ctxName } };
+          }
+        }
+
+        // ── network ───────────────────────────────────────────────
         case 'network_learn': {
           const pg = await this.kernel.sessionManager.getPage(input.context_name as string);
           const ctx = this.kernel.sessionManager.getBrowserContext();
@@ -403,14 +437,14 @@ export class Orchestrator {
           await this.kernel.networkOrchestrator.applyProfile('global', input.profile_name as string);
           return { status: 'success', data: { profile: input.profile_name } };
 
-        // ── Evidence ─────────────────────────────────────────────
+        // ── evidence ──────────────────────────────────────────────
         case 'evidence_export': {
           const verification = await this.kernel.evidenceLedger.verify(input.task_id as string);
           const exported = await this.kernel.evidenceLedger.export(input.task_id as string, 'json');
           return { status: 'success', data: { exportPath: exported.path, recordCount: exported.records, hashChainValid: verification.valid } };
         }
 
-        // ── Metrics ──────────────────────────────────────────────
+        // ── metrics ───────────────────────────────────────────────
         case 'metrics_report': {
           const report = input.task_id
             ? await this.kernel.metricsEngine.reportForTask(input.task_id as string)

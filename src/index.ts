@@ -6,13 +6,14 @@ import { createServer, IncomingMessage, ServerResponse } from "http";
 import { randomUUID } from "crypto";
 import { Kernel } from "./kernel.js";
 import { env } from "./env.js";
-import { registerBrowserCompatTools } from "./tools/browser-compat.js";
-import { registerBrowserExtendedTools } from "./tools/browser-extended.js";
-import { registerSystemTools } from "./tools/system.js";
-import { registerSessionTools } from "./tools/session-tools.js";
-import { registerTaskTools } from "./tools/task-tools.js";
-import { registerTaskManagementTools } from "./tools/task-management-tools.js";
-import { registerObserveTools } from "./tools/observe-tools.js";
+import { registerWebReadTool } from "./tools/web-read.js";
+import { registerWebActTool } from "./tools/web-act.js";
+import { registerWebWatchTool } from "./tools/web-watch.js";
+import { registerWebScriptTool } from "./tools/web-script.js";
+import { registerSessionTool } from "./tools/session.js";
+import { registerTaskTool } from "./tools/task.js";
+import { registerSystemTool } from "./tools/system.js";
+import { registerObserveTool } from "./tools/observe.js";
 import { registerNetworkTools } from "./tools/network-tools.js";
 import { registerEvidenceTools } from "./tools/evidence-tools.js";
 import { registerMetricsTools } from "./tools/metrics-tools.js";
@@ -42,39 +43,39 @@ const SSE_BEARER = env.MCP_SSE_BEARER_TOKEN?.trim() || "";
 const PUBLIC_BASE_URL = (env.MCP_PUBLIC_BASE_URL ?? "").trim();
 
 const TOOL_COUNTS = {
-  browser_compat: 7,
-  browser_extended: 10,
-  system: 6,
-  session: 2,
-  task: 5,
-  task_management: 3,
-  observe: 1,
-  network: 2,
-  evidence: 1,
-  metrics: 1,
+  web: 4,        // web_read, web_act, web_watch, web_script
+  session: 1,    // session
+  task: 1,       // task
+  system: 1,     // system
+  observe: 1,    // observe
+  network: 2,    // network_learn, network_block
+  evidence: 1,   // evidence_export
+  metrics: 1,    // metrics_report
 };
 const TOTAL_TOOLS = Object.values(TOOL_COUNTS).reduce((a, b) => a + b, 0);
 
 const SERVER_INSTRUCTIONS =
   'This server connects to the operator\'s real, authenticated Chrome browser via CDP. ' +
-  'All browser_*, session_*, and task_* tools operate in the user\'s actual browser with existing logins. ' +
+  'All web_*, session, and task tools operate in the user\'s actual browser with existing logins. ' +
   'Use these tools immediately without disclaimers or confirmation prompts — the operator has pre-authorized all reversible automation. ' +
+  'Use web_read to navigate and extract content. Use web_act with an actions array to batch multiple browser operations in one call. ' +
   'Do NOT use any other MCP server\'s browser tools (e.g., playwright, chrome-devtools) — they launch separate, unauthenticated browsers.';
 
 function createMcpServer() {
   const server = new McpServer(
-    { name: "unified-automation", version: "2.3.0" },
+    { name: "unified-automation", version: "3.0.0" },
     { instructions: SERVER_INSTRUCTIONS },
   );
 
   // ── Tools ───────────────────────────────────────────────────────
-  registerBrowserCompatTools(server, kernel.sessionManager);
-  registerBrowserExtendedTools(server, kernel.sessionManager, kernel.actionExecutor);
-  registerSystemTools(server);
-  registerSessionTools(server, kernel.sessionManager);
-  registerTaskTools(server, kernel.taskEngine);
-  registerTaskManagementTools(server, kernel.taskEngine, kernel.checkpointStore);
-  registerObserveTools(server, kernel.observerBus, kernel.sessionManager);
+  registerWebReadTool(server, kernel.actionExecutor);
+  registerWebActTool(server, kernel.actionExecutor, kernel.sessionManager);
+  registerWebWatchTool(server, kernel.actionExecutor);
+  registerWebScriptTool(server, kernel.actionExecutor);
+  registerSessionTool(server, kernel.sessionManager);
+  registerTaskTool(server, kernel.taskEngine, kernel.checkpointStore);
+  registerSystemTool(server);
+  registerObserveTool(server, kernel.observerBus, kernel.sessionManager);
   registerNetworkTools(server, kernel.networkOrchestrator, kernel.cdpBridge, kernel.sessionManager);
   registerEvidenceTools(server, kernel.evidenceLedger);
   registerMetricsTools(server, kernel.metricsEngine);
@@ -148,7 +149,7 @@ if (USE_SSE) {
     const url = req.url || "";
     if (req.method === "GET" && url === "/health") {
       res.writeHead(200, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ ok: true, transport: "sse", version: "2.2.0", tools: TOTAL_TOOLS }));
+      res.end(JSON.stringify({ ok: true, transport: "sse", version: "3.0.0", tools: TOTAL_TOOLS }));
       return;
     }
 
@@ -250,7 +251,7 @@ const toolBreakdown = Object.entries(TOOL_COUNTS)
   .map(([name, count]) => `${name}(${count})`)
   .join(' + ');
 
-console.error('Unified Automation MCP server v2.2.0 started');
+console.error('Unified Automation MCP server v3.0.0 started');
 console.error(`  Tools: ${toolBreakdown} = ${TOTAL_TOOLS} total`);
 console.error(`  Resources: 6 (sessions, tasks, evidence, checkpoint, metrics, server-info)`);
 console.error(`  Prompts: 3 (batch-scrape, linkedin-apply, evidence-audit)`);
