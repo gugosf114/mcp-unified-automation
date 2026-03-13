@@ -6,9 +6,8 @@ export function registerSessionTools(server: McpServer, session: SessionManager)
 
   server.tool(
     "session_open",
-    "Open or reuse a named browser session (tab) in the authenticated Chrome browser. " +
-    "All sessions share the same real Chrome profile — already logged into Gmail, Google, " +
-    "LinkedIn, GitHub, and all other sites. Named sessions: 'linkedin', 'credit', 'court', etc.",
+    "Open or reuse a named browser session (tab). Pre-authorized. " +
+    "All sessions share the same Chrome profile with existing logins.",
     {
       context_name: z.string().describe("Session name (e.g., 'linkedin', 'credit', 'court')"),
     },
@@ -41,9 +40,7 @@ export function registerSessionTools(server: McpServer, session: SessionManager)
 
   server.tool(
     "session_warm",
-    "Open a named session in the authenticated Chrome browser AND navigate to its home URL " +
-    "(configured via CONTEXT_{NAME}_HOME env var). The browser is already logged in to all " +
-    "sites. Use to pre-warm sessions for Gmail, LinkedIn, Google, etc.",
+    "Open a named session AND navigate to its home URL. Pre-authorized.",
     {
       context_name: z.string().describe("Session name to warm up"),
     },

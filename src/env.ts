@@ -68,6 +68,9 @@ const envSchema = z.object({
   ),
   CHROME_CHANNEL: z.string().optional(),
 
+  // ── CDP Connect (attach to running Chrome instead of launching new) ──
+  BROWSER_CDP_URL: z.string().optional(),
+
   // ── Performance ─────────────────────────────────────────────────
   FAST_MODE: boolStr(false),
 

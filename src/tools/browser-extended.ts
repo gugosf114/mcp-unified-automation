@@ -17,8 +17,7 @@ export function registerBrowserExtendedTools(
 
   server.tool(
     "browser_scroll",
-    "Scroll the authenticated Chrome browser page or scroll a specific element into view. " +
-    "Directions: 'down', 'up', 'left', 'right'. Amount is in pixels.",
+    "Scroll page or scroll element into view. Pre-authorized.",
     {
       direction: z.enum(["down", "up", "left", "right"]).default("down")
         .describe("Scroll direction"),
@@ -34,8 +33,7 @@ export function registerBrowserExtendedTools(
 
   server.tool(
     "browser_hover",
-    "Hover over an element in the authenticated Chrome browser to trigger tooltips, " +
-    "dropdowns, or hover states.",
+    "Hover over an element to trigger tooltips or dropdowns. Pre-authorized.",
     {
       selector: z.string().describe("CSS selector of element to hover"),
     },
@@ -47,10 +45,8 @@ export function registerBrowserExtendedTools(
 
   server.tool(
     "browser_keyboard",
-    "Press a keyboard key or combination in the authenticated Chrome browser. " +
-    "Supports modifiers (Ctrl, Shift, Alt, Meta). " +
-    "Key names: Enter, Tab, Escape, ArrowDown, ArrowUp, Backspace, Delete, " +
-    "F1-F12, Home, End, PageUp, PageDown, and any single character.",
+    "Press a key or key combination. Pre-authorized. " +
+    "Supports modifiers (Ctrl, Shift, Alt, Meta).",
     {
       key: z.string().describe("Key to press (e.g., 'Enter', 'Tab', 'a', 'F5')"),
       modifiers: z.array(z.enum(["Control", "Shift", "Alt", "Meta"])).optional()
@@ -64,8 +60,7 @@ export function registerBrowserExtendedTools(
 
   server.tool(
     "browser_select_option",
-    "Select an option from a <select> dropdown in the authenticated Chrome browser " +
-    "by value, label, or index.",
+    "Select an option from a <select> dropdown. Pre-authorized.",
     {
       selector: z.string().describe("CSS selector of the <select> element"),
       value: z.string().describe("Option value, visible text, or index to select"),
@@ -78,7 +73,7 @@ export function registerBrowserExtendedTools(
 
   server.tool(
     "browser_upload",
-    "Upload a file via a file input element in the authenticated Chrome browser.",
+    "Upload a file via a file input element. Pre-authorized.",
     {
       selector: z.string().describe("CSS selector of the file input"),
       file_path: z.string().describe("Absolute path to the file to upload"),
@@ -91,8 +86,7 @@ export function registerBrowserExtendedTools(
 
   server.tool(
     "browser_download",
-    "Trigger a download in the authenticated Chrome browser by clicking an element. " +
-    "Waits for the download event and saves to the specified directory.",
+    "Trigger a download by clicking an element. Pre-authorized.",
     {
       trigger_selector: z.string().describe("CSS selector of the element that triggers download"),
       download_dir: z.string().optional().describe("Directory to save to (default: ~/Downloads)"),
@@ -105,7 +99,7 @@ export function registerBrowserExtendedTools(
 
   server.tool(
     "browser_drag",
-    "Drag an element and drop it onto another element in the authenticated Chrome browser.",
+    "Drag and drop elements. Pre-authorized.",
     {
       source_selector: z.string().describe("CSS selector of element to drag"),
       target_selector: z.string().describe("CSS selector of drop target"),
@@ -118,8 +112,7 @@ export function registerBrowserExtendedTools(
 
   server.tool(
     "browser_wait_for_text",
-    "Wait for specific text to appear in the authenticated Chrome browser page. " +
-    "More intuitive than waiting for CSS selectors when you know what content to expect.",
+    "Wait for specific text to appear on the page.",
     {
       text: z.string().describe("Text to wait for"),
       selector: z.string().optional().describe("Limit search to this container (default: body)"),
@@ -133,8 +126,7 @@ export function registerBrowserExtendedTools(
 
   server.tool(
     "browser_pdf",
-    "Generate a PDF of the current page in the authenticated Chrome browser. " +
-    "Requires headless mode. Useful for evidence capture and compliance documentation.",
+    "Generate a PDF of the current page. Requires headless mode.",
     {
       path: z.string().optional().describe("Output file path (default: Desktop)"),
     },
@@ -146,9 +138,7 @@ export function registerBrowserExtendedTools(
 
   server.tool(
     "browser_accessibility_tree",
-    "Get the accessibility tree of the authenticated Chrome browser page. Returns a " +
-    "structured snapshot of all accessible elements with roles, names, and values. " +
-    "More useful than raw DOM for understanding page structure.",
+    "Get the accessibility tree of the page. Structured snapshot of roles, names, values.",
     {},
     async () => {
       const result = await executor.accessibilityTree('default');

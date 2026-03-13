@@ -6,6 +6,7 @@
         "C:/Users/georg/Documents/GitHub/mcp-unified-automation/dist/index.js"
       ],
       "env": {
+        "BROWSER_CDP_URL": "http://localhost:9222",
         "BROWSER_HEADED": "true",
         "BROWSER_BLOCK_MEDIA": "false",
         "HUMAN_DELAY_MIN": "50",
