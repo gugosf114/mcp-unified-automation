@@ -27,6 +27,8 @@ export class SessionManager {
   private pages: Map<ContextName, PageHandle> = new Map();
   private defaultContext: ContextName = 'default';
   private cdpMode: boolean = false;
+  /** Pages created by this server (safe to close). User's pre-existing tabs are never touched. */
+  private ownedPages: WeakSet<Page> = new WeakSet();
 
   // Configuration (from environment)
   private headed: boolean;
@@ -175,11 +177,17 @@ export class SessionManager {
 
   async close(): Promise<void> {
     if (this.cdpMode) {
-      // CDP mode: just disconnect — do NOT close the user's browser
+      // CDP mode: close only pages WE created, then disconnect
+      for (const [name, handle] of this.pages) {
+        if (!handle.page.isClosed() && this.ownedPages.has(handle.page)) {
+          await handle.page.close().catch(() => {});
+          console.error(`[SessionManager] Closed owned tab "${name}"`);
+        }
+      }
       this.context = null;
       this.browser = null;
       this.pages.clear();
-      console.error('[SessionManager] Disconnected from Chrome (browser stays open)');
+      console.error('[SessionManager] Disconnected from Chrome (user tabs untouched)');
     } else if (this.context) {
       await this.context.close();
       this.context = null;
@@ -217,13 +225,52 @@ export class SessionManager {
   }
 
   /**
-   * Pick the best reusable page from the context, skipping chrome:// internal tabs.
+   * Score and pick the best existing page to reuse.
+   *
+   * Scoring: higher = better candidate
+   *   +10  real URL (not chrome://, about:blank, chrome-extension://)
+   *   +5   page appears focused (only works reliably in CDP mode)
+   *   +2   page has a non-empty title (loaded content)
+   *   -20  page is owned by us (prefer user's existing tabs for "default")
+   *
+   * Falls back to last page if all score equally.
    */
-  private pickReusablePage(ctx: BrowserContext): Page | null {
+  private pickBestExistingPage(ctx: BrowserContext): Page | null {
     const pages = ctx.pages().filter(p => !p.isClosed());
     if (pages.length === 0) return null;
-    const realPages = pages.filter(p => !p.url().startsWith('chrome://'));
-    return realPages[realPages.length - 1] ?? pages[pages.length - 1];
+
+    const INTERNAL_URL = /^(chrome:|about:|chrome-extension:)/;
+
+    let bestPage: Page = pages[pages.length - 1];
+    let bestScore = -Infinity;
+
+    for (const page of pages) {
+      let score = 0;
+      const url = page.url();
+
+      // Prefer real content pages
+      if (!INTERNAL_URL.test(url)) score += 10;
+
+      // Prefer pages with loaded content
+      if (page.url() !== 'about:blank') {
+        try {
+          // title() is sync in Playwright's cache after navigation
+          score += 2;
+        } catch {
+          // page may have been destroyed between filter and here
+        }
+      }
+
+      // Prefer user's existing tabs over ones we created
+      if (this.ownedPages.has(page)) score -= 20;
+
+      if (score > bestScore) {
+        bestScore = score;
+        bestPage = page;
+      }
+    }
+
+    return bestPage;
   }
 
   // ── Named page management ─────────────────────────────────────────
@@ -242,13 +289,25 @@ export class SessionManager {
 
     const ctx = await this.launch();
     let page: Page;
+    let created = false;
 
     if (name === this.defaultContext) {
-      // For "default", reuse the most recent real page (skip chrome:// tabs)
-      const reusable = this.pickReusablePage(ctx);
-      page = reusable ?? await ctx.newPage();
+      // For "default", reuse the best existing tab (prefers user's real content pages)
+      const reusable = this.pickBestExistingPage(ctx);
+      if (reusable) {
+        page = reusable;
+      } else {
+        page = await ctx.newPage();
+        created = true;
+      }
     } else {
       page = await ctx.newPage();
+      created = true;
+    }
+
+    // Track pages we create so we know which are safe to close
+    if (created) {
+      this.ownedPages.add(page);
     }
 
     const handle: PageHandle = {
@@ -290,7 +349,12 @@ export class SessionManager {
   async closePage(name: ContextName): Promise<void> {
     const handle = this.pages.get(name);
     if (handle && !handle.page.isClosed()) {
-      await handle.page.close();
+      // In CDP mode, only close pages we created — never close the user's tabs
+      if (this.cdpMode && !this.ownedPages.has(handle.page)) {
+        console.error(`[SessionManager] Skipping close of user tab "${name}" (not owned by server)`);
+      } else {
+        await handle.page.close();
+      }
     }
     this.pages.delete(name);
   }
